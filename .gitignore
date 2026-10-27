@@ -1,0 +1,9 @@
+node_modules/
+data/
+*.sqlite*
+.env
+*.xlsx
+*.log
+preview.html
+site/
+supabase/private-*.sql
