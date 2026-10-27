@@ -60,20 +60,36 @@ function authScreen(status) {
 }
 const selected = () => data.holdings.filter(h => (owner === '전체' || h.owner === owner) && (account === '전체' || h.account === account));
 const money = n => hidden ? '••••••' : won(n);
+const localTime = date => new Date(date).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' });
+function automationNotice() {
+  if (!cloudApi && !data.automation) return '';
+  const a = data.automation;
+  if (!a?.enabled) return '<div class="info-strip automation-notice"><span class="info-icon">i</span><div><strong>매일 오전 7시 30분 자동 기록 · 설정 대기</strong><span> Supabase에서 자동 기록 설정 SQL을 실행하면 주가와 환율을 함께 갱신해 기록합니다.</span></div></div>';
+  const run = a.lastRun, probe = a.lastProbe;
+  let message = '다음 오전 7시 30분에 주가·환율을 조회합니다. 앱을 켜 둘 필요는 없어요.';
+  let failed = false;
+  if (run?.status === 'failed') { message = `${run.date} 기록 실패 · ${run.message} 기존 시세로 기록하지 않았습니다.`; failed = true; }
+  else if (run?.status === 'pending') message = '주가와 환율 조회 중입니다. 완료되면 기록이 반영됩니다.';
+  else if (run?.status === 'succeeded') message = `${localTime(run.capturedAt)} 기준 기록 완료 · 적용 환율 ${num(run.fx)}원/$`;
+  else if (probe?.status === 'failed') { message = '시세 연결 검사 실패 · 자동 기록이 정상 작동하는지 확인이 필요합니다.'; failed = true; }
+  else if (probe?.status === 'pending') message = '시세 연결을 검사하고 있습니다. 약 1~3분 뒤 결과가 반영됩니다.';
+  else if (probe?.status === 'succeeded') message = '시세 연결 검사 완료 · 다음 오전 7시 30분부터 자동 기록합니다.';
+  return `<div class="info-strip automation-notice ${failed ? 'automation-failed' : ''}"><span class="info-icon">${failed ? '!' : 'i'}</span><div><strong>매일 오전 7시 30분 자동 기록 · 한국시간</strong><span> ${esc(message)}</span></div></div>`;
+}
 function render() {
   const nav = [['home', '한눈에 보기', 'home'], ['assets', '보유 자산', 'assets'], ['history', '거래 내역', 'history'], ['trend', '자산 추이', 'chart']];
   $('#app').innerHTML = `<div class="shell"><aside class="sidebar"><a class="brand" href="./">${icon('chart')} 함께<span>PORTFOLIO</span></a><div class="workspace-label">우리의 자산 공간</div><nav>${nav.map(([id, title, i]) => `<button data-view="${id}" class="nav-item ${view === id ? 'active' : ''}">${icon(i)}<span>${title}</span>${view === id ? '<b>•</b>' : ''}</button>`).join('')}</nav><div class="sidebar-note"><span>차곡차곡, 함께.</span><p>작은 기록이 모여<br>더 단단한 내일이 됩니다.</p><div class="plant">⌁</div></div><div class="profile"><span class="avatar">${esc(data.user[0])}</span><div><strong>${esc(data.user)}</strong><small>가족 포트폴리오</small></div><button id="logout" class="icon-btn" aria-label="로그아웃">${icon('logout')}</button></div></aside>
   <main class="main"><header class="topbar"><div class="breadcrumb">우리 가족 <span>/</span> ${nav.find(n => n[0] === view)[1]}</div><div class="top-actions"><span class="shared"><i></i> 함께 보는 자산</span><button id="refresh" class="icon-btn" aria-label="데이터 새로고침">${icon('refresh')}</button><button id="settings" class="icon-btn" aria-label="시세 및 설정">${icon('settings')}</button></div></header>
   <div class="content"><div class="page-heading"><div><div class="eyebrow">${view === 'home' ? 'OUR FAMILY PORTFOLIO' : 'TOGETHER, STEP BY STEP'}</div><h1>${{ home: '우리 자산, 한눈에', assets: '차곡차곡 모은 자산', history: '오늘의 기록, 내일의 자산', trend: '우리가 걸어온 자산의 흐름' }[view]}</h1><p>${{ home: '각자의 자산을 모아, 우리 가족의 현재를 살펴보세요.', assets: '소유자와 계좌별로 보유 현황을 확인하세요.', history: '매수부터 입출금까지, 모든 기록을 한곳에서 확인하세요.', trend: '엑셀에서 이어온 기록과 오늘의 자산을 함께 살펴보세요.' }[view]}</p></div><button id="add" class="btn primary">${icon('plus')} 거래 기록</button></div>
-  <div class="filter-row"><div class="segmented" aria-label="자산 소유자">${['전체', ...data.owners].map(o => `<button data-owner="${esc(o)}" class="${owner === o ? 'selected' : ''}">${o === '전체' ? '우리 가족' : esc(o)}</button>`).join('')}</div><span class="quote-date">${data.quoteUpdatedAt ? `${new Date(data.quoteUpdatedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })} 수동 갱신` : '엑셀 저장 시세 기준 · 실시간 아님'}</span></div>
-  ${view === 'home' ? home() : view === 'assets' ? assets() : view === 'history' ? history() : trend()}
-  <footer>함께 <span>·</span> 우리 자산의 다음 장 <span class="footer-right">USD/KRW ${num(data.fx)} · 수동 시세</span></footer></div></main>
+  <div class="filter-row"><div class="segmented" aria-label="자산 소유자">${['전체', ...data.owners].map(o => `<button data-owner="${esc(o)}" class="${owner === o ? 'selected' : ''}">${o === '전체' ? '우리 가족' : esc(o)}</button>`).join('')}</div><span class="quote-date">${data.quoteUpdatedAt ? `${new Date(data.quoteUpdatedAt).toLocaleString('ko-KR', { timeZone: 'Asia/Seoul' })} ${data.quoteSource === 'automatic' ? '자동 갱신' : '수동 갱신'}` : '엑셀 저장 시세 기준 · 실시간 아님'}</span></div>
+  ${automationNotice()}${view === 'home' ? home() : view === 'assets' ? assets() : view === 'history' ? history() : trend()}
+  <footer>함께 <span>·</span> 우리 자산의 다음 장 <span class="footer-right">USD/KRW ${num(data.fx)} · ${data.quoteSource === 'automatic' ? '자동 조회 시세' : '수동 시세'}</span></footer></div></main>
   <nav class="mobile-nav">${nav.map(([id, title, i]) => `<button data-view="${id}" class="${view === id ? 'active' : ''}">${icon(i)}<span>${title}</span></button>`).join('')}</nav></div>`;
   $$('[data-view]', el => el.onclick = () => { view = el.dataset.view; account = '전체'; search = ''; render(); window.scrollTo(0, 0); });
   $$('[data-owner]', el => el.onclick = () => { owner = el.dataset.owner; account = '전체'; render(); });
   $('#add').onclick = transactionModal;
   $('#settings').onclick = settingsModal;
-  $('#refresh').onclick = async () => { try { data = await api('state'); render(); toast('최신 저장 데이터를 불러왔습니다. 시세는 수동 갱신합니다.'); } catch (e) { toast(e.message); } };
+  $('#refresh').onclick = async () => { try { data = await api('state'); render(); toast('최신 저장 데이터를 불러왔습니다.'); } catch (e) { toast(e.message); } };
   $('#logout').onclick = async () => { try { await api('logout', {}); clearInterval(refreshTimer); data = null; authScreen(await api('status')); } catch (e) { toast(e.message); } };
   $('#hide')?.addEventListener('click', () => { hidden = !hidden; render(); });
   $('#see-assets')?.addEventListener('click', () => { view = 'assets'; render(); });
@@ -91,7 +107,7 @@ function home() {
   <div class="dashboard-grid"><section class="panel trend-panel"><div class="panel-head"><div><h2>자산의 흐름</h2><p>우리 가족이 함께 쌓아온 기록</p></div><div class="periods">${['1개월', '3개월', '전체'].map(p => `<button data-period="${p}" class="${period === p ? 'active' : ''}">${p}</button>`).join('')}</div></div>${chart()}<div class="chart-note">가족 전체 기록 · 개인별 과거 추이는 원본에 없습니다.</div></section><section class="panel allocation"><div class="panel-head"><div><h2>자산 구성</h2><p>어디에 얼마나 담겨 있을까요?</p></div><span class="muted">종목별</span></div>${allocation(hs)}</section></div>
   <div class="dashboard-grid bottom-grid"><section class="panel"><div class="panel-head"><div><h2>${owner === '전체' ? '각자의 자산' : '계좌별 자산'}</h2><p>함께 보고, 각자 차곡차곡</p></div><button id="see-assets" class="text-btn">자세히 ${icon('arrow')}</button></div>${owner === '전체' ? data.owners.map((o, i) => { const amount = sum(data.holdings.filter(h => h.owner === o)); return `<div class="person-row"><span class="person-icon p${i}">${esc(o[0])}</span><div><strong>${esc(o)}</strong><small>${new Set(data.holdings.filter(h => h.owner === o).map(h => h.account)).size}개 계좌</small></div><div class="person-amount"><strong>${money(amount)}<small>원</small></strong><span>가족 자산의 ${(amount / (sum(data.holdings) || 1) * 100).toFixed(1)}%</span></div></div>`; }).join('') : [...new Set(hs.map(h => h.account))].map(a => `<div class="person-row"><span class="person-icon">${icon('assets')}</span><strong>${esc(a)}</strong><div class="person-amount"><strong>${money(sum(hs.filter(h => h.account === a)))}<small>원</small></strong></div></div>`).join('')}</section>
   <section class="panel"><div class="panel-head"><div><h2>최근 거래</h2><p>우리 자산의 작은 발자국</p></div><button id="see-history" class="text-btn">전체 보기 ${icon('arrow')}</button></div>${transactionRows(filteredTransactions().slice(0, 3))}</section></div>
-  <div class="info-strip"><span class="info-icon">i</span><div><strong>엑셀의 기록을 그대로 이어왔어요.</strong><span> 현재가는 저장 시세입니다. 설정에서 가격과 환율을 갱신할 수 있어요.</span></div><button class="text-btn" id="inline-settings">시세 관리 ↗</button></div>`;
+  <div class="info-strip"><span class="info-icon">i</span><div><strong>엑셀의 기록을 그대로 이어왔어요.</strong><span> ${data.automation?.enabled ? '매일 오전 7시 30분에 주가와 환율을 조회합니다. 휴장일에는 최근 제공 시세를 사용해요.' : '현재가는 저장 시세입니다. 설정에서 가격과 환율을 갱신할 수 있어요.'}</span></div><button class="text-btn" id="inline-settings">시세 관리 ↗</button></div>`;
 }
 function chart() {
   let points = data.history;
@@ -128,7 +144,7 @@ function history() {
   return `<section class="panel"><div class="asset-toolbar"><div><h2>모든 거래 <span class="count">${rows.length}</span></h2><p>최근 입력순 · 내 계정의 거래만 추가할 수 있어요.</p></div><input id="search" type="search" placeholder="종목, 계좌, 거래 종류 검색" aria-label="거래 검색" value="${esc(search)}"></div><div class="transaction-list">${transactionRows(rows)}</div></section><p class="disclaimer">엑셀의 기존 100건에는 거래 날짜가 없어 원본 순서를 유지했습니다. 기존 기록은 보존하며, 새 거래만 현재 보유자산에 반영합니다.</p>`;
 }
 function trend() {
-  return `<section class="panel"><div class="panel-head"><div><h2>가족 전체 자산 추이</h2><p>자산 증감에는 입출금이 포함됩니다. 투자 수익률과 다를 수 있어요.</p></div><button id="snapshot" class="btn secondary">${icon('plus')} 오늘 기록</button></div><div class="periods standalone">${['1개월', '3개월', '전체'].map(p => `<button data-period="${p}" class="${period === p ? 'active' : ''}">${p}</button>`).join('')}</div>${chart()}</section><section class="panel history-values"><div class="panel-head"><h2>기록된 자산</h2><span class="muted">${data.history.length}개 기록</span></div><div class="table-scroll"><table><thead><tr><th>날짜</th><th>출처</th><th class="right">가족 총자산</th></tr></thead><tbody>${data.history.toReversed().map(h => `<tr><td>${esc(h.date)}</td><td><span class="source-tag">${h.source === 'app' ? '앱 기록' : '엑셀'}</span></td><td class="right strong">${money(h.value)} 원</td></tr>`).join('')}</tbody></table></div></section><p class="disclaimer">엑셀의 마지막 추이 값과 보유자산 합계는 원본부터 서로 다릅니다. ‘오늘 기록’을 누르면 오늘의 추이 값을 현재 보유자산 합계로 저장합니다.</p>`;
+  return `<section class="panel"><div class="panel-head"><div><h2>가족 전체 자산 추이</h2><p>자산 증감에는 입출금이 포함됩니다. 투자 수익률과 다를 수 있어요.</p></div><button id="snapshot" class="btn secondary" ${data.history.some(h => h.date === kday() && h.source === 'automatic') ? 'disabled title="오늘의 자동 기록을 보존합니다."' : ''}>${icon('plus')} 오늘 기록</button></div><div class="periods standalone">${['1개월', '3개월', '전체'].map(p => `<button data-period="${p}" class="${period === p ? 'active' : ''}">${p}</button>`).join('')}</div>${chart()}</section><section class="panel history-values"><div class="panel-head"><h2>기록된 자산</h2><span class="muted">${data.history.length}개 기록</span></div><div class="table-scroll"><table><thead><tr><th>날짜</th><th>출처</th><th class="right">적용 환율</th><th>환율 기준 시각</th><th class="right">가족 총자산</th></tr></thead><tbody>${data.history.toReversed().map(h => `<tr><td>${esc(h.date)}</td><td><span class="source-tag">${h.source === 'automatic' ? '자동 ' + new Date(h.recordedAt).toLocaleTimeString('ko-KR', {timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',hour12:false}) : h.source === 'app' ? '앱 기록' : '엑셀'}</span></td><td class="right">${h.fx ? num(h.fx) + ' 원/$' : '—'}</td><td>${h.fxAsOf ? esc(localTime(h.fxAsOf)) : '—'}</td><td class="right strong">${money(h.value)} 원</td></tr>`).join('')}</tbody></table></div></section><p class="disclaimer">엑셀의 마지막 추이 값과 보유자산 합계는 원본부터 서로 다릅니다. 자동 기록은 한국시간 오전 7시 30분 기준입니다. 시세 조회 완료 후 약 1~3분 뒤 반영되며, 휴장일에는 최근 제공 시세를 사용합니다. 오늘의 자동 기록은 수동으로 덮어쓰지 않습니다.</p>`;
 }
 function openModal(html) {
   $('#modal-content').innerHTML = html;

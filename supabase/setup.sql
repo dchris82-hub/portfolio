@@ -143,11 +143,14 @@ begin
       if v_price > 1e10 then raise exception '가격을 확인해 주세요.'; end if;
       select jsonb_agg(case when e->>'ticker' = v_pair.key then e || jsonb_build_object('price', v_price) else e end order by n) into hs from jsonb_array_elements(hs) with ordinality a(e,n);
     end loop;
-    s := s || jsonb_build_object('holdings', hs, 'fx', v_fx, 'quoteUpdatedAt', current_timestamp, 'quoteUpdatedBy', v_owner);
+    s := s || jsonb_build_object('holdings', hs, 'fx', v_fx, 'quoteUpdatedAt', current_timestamp, 'quoteUpdatedBy', v_owner, 'quoteSource', 'manual');
   else
+    if exists(select 1 from jsonb_array_elements(s->'history') e where e->>'date' = v_today and e->>'source' = 'automatic') then
+      raise exception '오늘 오전 7시 30분의 자동 기록이 있습니다. 해당 기록은 수동으로 덮어쓰지 않습니다.';
+    end if;
     select coalesce(sum((e->>'quantity')::numeric * (e->>'price')::numeric * case when e->>'currency' = 'USD' then (s->>'fx')::numeric else 1 end),0) into v_value from jsonb_array_elements(hs) e;
     select coalesce(jsonb_agg(e order by e->>'date'), '[]'::jsonb) into h from jsonb_array_elements(s->'history') e where e->>'date' <> v_today;
-    h := h || jsonb_build_array(jsonb_build_object('date', v_today, 'value', v_value, 'source', 'app'));
+    h := h || jsonb_build_array(jsonb_build_object('date', v_today, 'value', v_value, 'source', 'app', 'recordedAt', clock_timestamp(), 'fx', s->'fx'));
     select jsonb_agg(e order by e->>'date') into h from jsonb_array_elements(h) e;
     s := s || jsonb_build_object('history', h);
   end if;
