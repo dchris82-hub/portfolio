@@ -57,6 +57,7 @@ test('Supabase SQL: RLS, two-member authorization, atomic trades and USD fees', 
     let s = await mutate(a, 'transactions', { version: 0, date: today(), type: '매수', account: '일반계좌', owner: '사용자B', ticker: 'aapl', quantity: 2, price: 12, fx: 1400, fee: 0.5 });
     assert.equal(s.holdings[0].quantity, 100000);
     assert.equal(s.holdings[1].costPrice, 10);
+    assert.equal(s.holdings[1].quantity * s.holdings[1].costPrice, 40);
     assert.equal(s.transactions[0].owner, '사용자A');
     assert.equal(s.transactions[0].feeCurrency, 'USD');
     assert.equal(s.transactions[0].fee, 0.5);
@@ -65,6 +66,8 @@ test('Supabase SQL: RLS, two-member authorization, atomic trades and USD fees', 
     s = await mutate(a, 'transactions', { version: 1, date: today(), type: '매도', account: '일반계좌', ticker: 'AAPL', quantity: 1, price: 15, fx: 1400, fee: 0.5 });
     assert.equal(s.holdings[0].quantity, 100000);
     assert.equal(s.transactions.at(-1).amount, 14.5);
+    assert.equal(s.holdings[1].costPrice, 10);
+    assert.equal(s.holdings[1].quantity * s.holdings[1].costPrice, 30);
     for (const changes of [{ quantity: 1000 }, { fee: 16 }, { quantity: -1 }, { price: '15' }, { date: '2000-01-01' }]) {
       await assert.rejects(mutate(a, 'transactions', { version: 2, date: today(), type: '매도', account: '일반계좌', ticker: 'AAPL', quantity: 1, price: 15, fx: 1400, fee: 0.5, ...changes }));
       assert.equal((await get(a)).version, 2);
