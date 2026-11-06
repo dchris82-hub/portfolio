@@ -10,3 +10,5 @@
 
 .metric-card .native-balances{margin-top:16px;display:grid;gap:10px}.metric-card .native-balances p{margin:0;line-height:1.5;color:#455d48}.native-balances span{display:block;font-size:12px;color:#677862;margin-bottom:2px}.native-balances strong{display:block;font-size:17px;font-weight:650;font-variant-numeric:tabular-nums;overflow-wrap:anywhere;letter-spacing:-.2px}@media(max-width:700px){.native-balances strong{font-size:16px}.metric-card .native-balances{gap:12px}}
 @media(max-width:900px){.summary-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.summary-grid>*{min-width:0}.metric-number{white-space:normal;overflow-wrap:anywhere}.metric-number>span{display:inline-block;white-space:nowrap}}
+
+.metric-card .native-balances strong{font-size:21px;color:#2e4736}.metric-card .native-balances span{font-size:14px;color:#52694b}@media(max-width:700px){.metric-card .native-balances strong{font-size:20px}}
