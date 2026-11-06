@@ -22,3 +22,5 @@
 .holdings-panel .asset-toolbar h2{font-size:22px}.holdings-panel th{font-size:16px}.holdings-panel .stock-cell strong{font-size:15px}.holdings-panel .stock-cell small{font-size:12px}.holdings-panel .holding-quantity,.holdings-panel .holding-price,.holdings-panel .purchase-price,.holdings-panel .purchase-amount{font-size:14px}.holdings-panel .valuation-native small{font-size:13px}@media(max-width:700px){.holdings-panel .asset-toolbar h2{font-size:20px}.holdings-panel th{font-size:15px}.holdings-panel .stock-cell strong{font-size:14px}.holdings-panel .holding-quantity,.holdings-panel .holding-price,.holdings-panel .purchase-price,.holdings-panel .purchase-amount{font-size:13px}}
 
 .holdings-panel .holding-owner,.holdings-panel .holding-return{font-size:13px}
+
+.native-balances .native-amount{white-space:nowrap;overflow-wrap:normal}.native-balances .currency-unit{font-size:calc(1em - 4px);font-weight:400;margin-left:4px;color:inherit}@media(max-width:700px){.summary-grid:has(.native-balances .wide-amount){grid-template-columns:minmax(0,1fr)}}
