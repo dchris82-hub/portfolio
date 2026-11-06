@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const config = JSON.parse(readFileSync(path.join(root, 'deploy-config.json'), 'utf8'));
 if (config.backend !== 'supabase' || !/^https:\/\/[a-z0-9]+\.supabase\.co$/.test(config.url) || !/^sb_publishable_[A-Za-z0-9_-]+$/.test(config.publishableKey)) throw Error('공개용 Supabase 연결 설정을 확인해 주세요.');
-const revision = createHash('sha256').update(JSON.stringify(config) + ['app.js','style.css','supabase-client.js'].map(f => readFileSync(path.join(root,'public',f),'utf8')).join('')).digest('hex').slice(0,12);
+const revision = createHash('sha256').update(readFileSync(fileURLToPath(import.meta.url),'utf8') + JSON.stringify(config) + ['app.js','style.css','supabase-client.js'].map(f => readFileSync(path.join(root,'public',f),'utf8')).join('')).digest('hex').slice(0,12);
 // Explicit allowlist: never copy source checkouts, Excel, SQL imports, previews or DBs.
 const out = path.join(root, 'site');
 rmSync(out, { recursive: true, force: true });
@@ -19,10 +19,19 @@ writeFileSync(path.join(out, 'manifest.webmanifest'), JSON.stringify(manifest));
 let html = readFileSync(path.join(root, 'public/index.html'), 'utf8').replaceAll('href="/', 'href="./').replaceAll('src="/', 'src="./');
 html = html.replace('<script type="module" src="./app.js"></script>', '<script src="./config.js"></script><script type="module" src="./app.js"></script>');
 html = html.replace('이 문구만 계속 보이면 웹 미리보기에서 스크립트가 연결되지 않은 상태입니다.<br>별도로 제공된 preview.html 미리보기를 열어 주세요.', '연결이 지연되면 인터넷 연결을 확인한 뒤 새로고침해 주세요.');
-for (const file of ['app.js','style.css','config.js']) html = html.replaceAll(`./${file}"`, `./${file}?v=${revision}"`);
-writeFileSync(path.join(out,'app.js'),readFileSync(path.join(out,'app.js'),'utf8').replace("import('./supabase-client.js')", `import('./supabase-client.js?v=${revision}')`));
+for (const file of ['app.js','style.css','config.js']) {
+  const [name,extension]=file.split('.');
+  html=html.replaceAll(`./${file}"`, `./${name}.${revision}.${extension}"`);
+}
+writeFileSync(path.join(out,'app.js'),readFileSync(path.join(out,'app.js'),'utf8').replace("import('./supabase-client.js')", `import('./supabase-client.${revision}.js')`));
 html = html.replace('</head>', `<meta name="app-build" content="${revision}"></head>`);
 writeFileSync(path.join(out, 'index.html'), html);
 writeFileSync(path.join(out, 'config.js'), `window.PORTFOLIO_CONFIG = Object.freeze(${JSON.stringify(config)});\n`);
+for (const file of ['app.js','style.css','config.js','supabase-client.js']) {
+  const [name,extension]=file.split('.');
+  copyFileSync(path.join(out,file),path.join(out,`${name}.${revision}.${extension}`));
+}
+writeFileSync(path.join(out,`update-${revision}.html`),html);
 writeFileSync(path.join(out, '.nojekyll'), '');
+console.log(`Fresh verification page: update-${revision}.html`);
 console.log('GitHub Pages build ready in site/ (public assets only; no financial data).');
