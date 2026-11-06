@@ -157,7 +157,7 @@ begin
       select price into v_fx from portfolio_private.snapshot_quotes where run_id=r.id and ticker='USD/KRW';
       select jsonb_object_agg(ticker,jsonb_build_object('price',price,'asOf',as_of,'currency',currency,'providerSymbol',symbol)) into details
         from portfolio_private.snapshot_quotes where run_id=r.id;
-      select sum(case when h->>'ticker'='CASH' then (h->>'quantity')::numeric else
+      select sum(case when h->>'ticker'='CASH' then (h->>'quantity')::numeric * case when h->>'currency'='USD' then v_fx else 1 end else
         (h->>'quantity')::numeric * (details #>> array[h->>'ticker','price'])::numeric * case when h->>'currency'='USD' then v_fx else 1 end end)
         into v_total from jsonb_array_elements(r.holdings) h where (h->>'quantity')::numeric>0;
       v_total:=coalesce(v_total,0);

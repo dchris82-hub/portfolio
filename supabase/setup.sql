@@ -73,7 +73,7 @@ declare
   v_type text; v_account text; v_ticker text; v_currency text;
   v_quantity numeric; v_price numeric; v_fx numeric; v_fee numeric; v_fee_krw numeric;
   v_gross numeric; v_amount numeric; v_cash numeric; v_old_quantity numeric; v_cost numeric; v_value numeric;
-  v_pair record;
+  v_pair record; v_native text; v_krw_i integer; v_usd_i integer; v_krw numeric; v_usd numeric; v_received numeric; v_before jsonb;
 begin
   select owner into v_owner from public.portfolio_members where user_id = auth.uid();
   if v_owner is null then raise exception using errcode = '42501', message = '등록된 가족 계정만 이용할 수 있습니다.'; end if;
@@ -87,18 +87,54 @@ begin
   hs := s->'holdings';
   if p_action = 'transactions' then
     v_type := p_entry->>'type'; v_account := p_entry->>'account';
-    if v_type is null or v_type not in ('매수', '매도', '입금', '출금') then raise exception '거래 종류를 선택해 주세요.'; end if;
+    if v_type in ('입금','출금') and p_entry ? 'currency' and p_entry->>'currency' not in ('KRW','USD') then raise exception '입출금 통화를 확인해 주세요.'; end if;
+    if v_type is null or v_type not in ('매수', '매도', '입금', '출금', '환전', '잔고조정') then raise exception '거래 종류를 선택해 주세요.'; end if;
     if p_entry->>'date' is distinct from v_today then raise exception '새 거래는 오늘 날짜로 입력해 주세요.'; end if;
+    v_native := case when v_type in ('입금','출금') then case when p_entry->>'currency'='USD' then 'USD' else 'KRW' end
+      when upper(trim(p_entry->>'ticker')) like 'KRX:%' then 'KRW' else 'USD' end;
+    select (e.ordinality-1)::integer into v_krw_i from jsonb_array_elements(hs) with ordinality e(value,ordinality)
+      where e.value->>'owner'=v_owner and e.value->>'account'=v_account and e.value->>'ticker'='CASH' and e.value->>'currency'='KRW';
+    if v_krw_i is null then raise exception '본인 계좌를 확인해 주세요.'; end if;
+    select (e.ordinality-1)::integer into v_usd_i from jsonb_array_elements(hs) with ordinality e(value,ordinality)
+      where e.value->>'owner'=v_owner and e.value->>'account'=v_account and e.value->>'ticker'='CASH' and e.value->>'currency'='USD';
+    if v_usd_i is null then
+      v_usd_i:=jsonb_array_length(hs);
+      hs:=hs||jsonb_build_array((hs->v_krw_i)||jsonb_build_object('id',gen_random_uuid()::text,'currency','USD','quantity',0,'name','달러 예수금'));
+    end if;
+    v_krw:=(hs->v_krw_i->>'quantity')::numeric; v_usd:=(hs->v_usd_i->>'quantity')::numeric;
+    v_before:=jsonb_build_object('KRW',v_krw,'USD',v_usd);
     select (e.ordinality-1)::integer, e.value into v_cash_index, cash
       from jsonb_array_elements(hs) with ordinality e(value, ordinality)
-      where e.value->>'owner' = v_owner and e.value->>'account' = v_account and e.value->>'ticker' = 'CASH';
+      where e.value->>'owner' = v_owner and e.value->>'account' = v_account and e.value->>'ticker' = 'CASH' and e.value->>'currency'=v_native;
     if v_cash_index is null then raise exception '본인 계좌를 확인해 주세요.'; end if;
     v_cash := (cash->>'quantity')::numeric;
-    if v_type in ('입금', '출금') then
+    if v_type in ('환전','잔고조정') then
+      if v_type='잔고조정' then
+        v_krw:=portfolio_private.number(p_entry->'krwBalance','원화 잔고',true);
+        v_usd:=portfolio_private.number(p_entry->'usdBalance','달러 잔고',true);
+      else
+        if p_entry->>'fromCurrency' is null or p_entry->>'fromCurrency' not in ('KRW','USD') then raise exception '환전 방향을 확인해 주세요.'; end if;
+        v_amount:=portfolio_private.number(p_entry->'amount','보낸 금액');
+        v_received:=portfolio_private.number(p_entry->'received','실제 받은 금액');
+        if p_entry->>'fromCurrency'='KRW' then
+          if v_krw<v_amount then raise exception '원화 잔고가 부족합니다.'; end if;
+          v_krw:=v_krw-v_amount;v_usd:=v_usd+v_received;
+        else
+          if v_usd<v_amount then raise exception '달러 잔고가 부족합니다.'; end if;
+          v_usd:=v_usd-v_amount;v_krw:=v_krw+v_received;
+        end if;
+      end if;
+      hs:=jsonb_set(hs,array[v_krw_i::text,'quantity'],to_jsonb(v_krw));
+      hs:=jsonb_set(hs,array[v_usd_i::text,'quantity'],to_jsonb(v_usd));
+      v_cash_index:=v_krw_i;v_cash:=v_krw;
+      tx:=jsonb_build_object('type',v_type,'owner',v_owner,'account',v_account,'ticker','CASH','name',v_type,'date',v_today,
+        'before',v_before,'after',jsonb_build_object('KRW',v_krw,'USD',v_usd),'amount',coalesce(v_amount,0),
+        'currency',coalesce(p_entry->>'fromCurrency','KRW'),'received',v_received,'receivedCurrency',case when p_entry->>'fromCurrency'='KRW' then 'USD' else 'KRW' end);
+    elsif v_type in ('입금', '출금') then
       v_amount := portfolio_private.number(p_entry->'amount', '금액');
       if v_type = '출금' and v_cash < v_amount then raise exception '출금 가능한 현금이 부족합니다.'; end if;
       v_cash := v_cash + case when v_type = '입금' then v_amount else -v_amount end;
-      tx := jsonb_build_object('type', v_type, 'owner', v_owner, 'account', v_account, 'ticker', 'CASH', 'name', '현금', 'quantity', v_amount, 'price', 1, 'currency', 'KRW', 'amount', v_amount, 'date', v_today);
+      tx := jsonb_build_object('type', v_type, 'owner', v_owner, 'account', v_account, 'ticker', 'CASH', 'name', '현금', 'quantity', v_amount, 'price', 1, 'currency', v_native, 'amount', v_amount, 'date', v_today);
     else
       v_ticker := upper(trim(coalesce(p_entry->>'ticker', '')));
       if v_ticker !~ '^(KRX:[0-9]{6}|[A-Z][A-Z0-9.\-]{0,14})$' or v_ticker = 'CASH' then raise exception '티커를 확인해 주세요. 국내 종목은 KRX:종목코드 형식입니다.'; end if;
@@ -106,7 +142,7 @@ begin
       v_quantity := portfolio_private.number(p_entry->'quantity', '수량');
       v_price := portfolio_private.number(p_entry->'price', '단가');
       v_fee := portfolio_private.number(coalesce(p_entry->'fee', '0'::jsonb), '수수료', true);
-      v_fx := case when v_currency = 'USD' then portfolio_private.number(p_entry->'fx', '거래 환율') else 1 end;
+      v_fx := 1;
       v_gross := v_quantity * v_price * v_fx; v_fee_krw := v_fee * v_fx;
       if v_gross > 1e14 or v_fee_krw > 1e14 or (v_type = '매도' and v_fee_krw > v_gross) then raise exception '거래 금액 또는 수수료를 확인해 주세요.'; end if;
       v_amount := v_gross + case when v_type = '매수' then v_fee_krw else -v_fee_krw end;
@@ -129,10 +165,10 @@ begin
         v_cash := v_cash + v_amount;
       end if;
       hs := jsonb_set(hs, array[v_index::text], h);
-      tx := jsonb_build_object('type', v_type, 'owner', v_owner, 'account', v_account, 'ticker', v_ticker, 'name', h->>'name', 'quantity', v_quantity, 'price', v_price, 'currency', v_currency, 'fx', v_fx, 'fee', v_fee, 'feeCurrency', v_currency, 'feeKrw', v_fee_krw, 'amount', v_amount, 'date', v_today);
+      tx := jsonb_build_object('type', v_type, 'owner', v_owner, 'account', v_account, 'ticker', v_ticker, 'name', h->>'name', 'quantity', v_quantity, 'price', v_price, 'currency', v_currency, 'fee', v_fee, 'feeCurrency', v_currency, 'amount', v_amount, 'date', v_today);
     end if;
     hs := jsonb_set(hs, array[v_cash_index::text, 'quantity'], to_jsonb(v_cash));
-    tx := tx || jsonb_build_object('id', gen_random_uuid()::text, 'createdAt', current_timestamp, 'imported', false);
+    tx := tx || jsonb_build_object('id', gen_random_uuid()::text, 'createdAt', current_timestamp, 'imported', false, 'cashAccounting','native-v2');
     s := s || jsonb_build_object('holdings', hs, 'transactions', (s->'transactions') || jsonb_build_array(tx));
   elsif p_action = 'prices' then
     v_fx := portfolio_private.number(p_entry->'fx', '환율');

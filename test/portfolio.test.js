@@ -14,17 +14,18 @@ const seed = () => ({ version: 0, fx: 1400, owners: ['사용자A', '사용자B']
 
 test('해외 매수 환산·수수료·평균단가, 매도 잔고를 계산한다', () => {
   const s = seed();
+  s.holdings.push({...s.holdings[0],id:'usd',currency:'USD',quantity:100});
   const buy = transact(s, { type: '매수', account: '일반계좌', date: today(), ticker: 'aapl', quantity: 2, price: 12, fx: 1400, fee: 0.5 }, '사용자A');
-  assert.equal(s.holdings[0].quantity, 65700);
+  assert.equal(s.holdings[0].quantity, 100000); assert.equal(s.holdings[3].quantity,75.5);
   assert.equal(buy.feeCurrency, 'USD');
-  assert.equal(buy.feeKrw, 700);
-  assert.equal(buy.amount, 34300);
+  assert.equal(buy.fee, 0.5);
+  assert.equal(buy.amount, 24.5);
   assert.equal(s.holdings[1].quantity, 4);
   assert.equal(s.holdings[1].costPrice, 10);
   transact(s, { type: '매도', account: '일반계좌', date: today(), ticker: 'AAPL', quantity: 1, price: 15, fx: 1400, fee: 0.5 }, '사용자A');
-  assert.equal(s.holdings[0].quantity, 86000);
+  assert.equal(s.holdings[0].quantity, 100000); assert.equal(s.holdings[3].quantity,90);
   assert.equal(s.holdings[1].quantity, 3);
-  assert.equal(totalOf(s.holdings, s.fx), 328000);
+  assert.equal(totalOf(s.holdings, s.fx), 468000);
   assert.throws(() => transact(s, { type: '매도', account: '일반계좌', date: today(), ticker: 'AAPL', quantity: 1, price: 15, fx: 1400, fee: 16 }, '사용자A'), /수수료/);
 });
 
@@ -44,7 +45,7 @@ test('입출금과 신규 국내 종목 매수를 반영한다', () => {
   const buy = transact(s, { type: '매수', account: '일반계좌', date: today(), ticker: 'KRX:381170', name: '국내 ETF', quantity: 2, price: 10000, fee: 100 }, '사용자A');
   assert.equal(s.holdings[0].quantity, 109900);
   assert.equal(buy.feeCurrency, 'KRW');
-  assert.equal(buy.feeKrw, 100);
+  assert.equal(buy.fee, 100);
   assert.equal(s.holdings.at(-1).currency, 'KRW');
   assert.equal(s.holdings.at(-1).quantity, 2);
 });

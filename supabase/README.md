@@ -77,3 +77,11 @@ order by id desc limit 5;
 ```
 
 자동 기록을 일시 중지하려면 `select cron.alter_job(job_id := (select jobid from cron.job where jobname='portfolio-daily-kst-0730'), active := false);`를 관리자 SQL Editor에서 실행합니다. Supabase 프로젝트가 중지되면 작업도 실행되지 않으며 누락일을 임의 가격으로 채우지 않습니다. 무료 프로젝트의 일시 중지 정책은 Supabase의 현재 요금제 안내를 확인하세요.
+
+## 원화·달러 예수금 전환
+
+운영 중 업그레이드는 `currency-balances.sql`을 SQL Editor에서 실행합니다. 같은 내용의 개인 작업 공간 파일은 `/workspace/portfolio-data/enable-currency-balances.sql`입니다. 기존 원화 잔고와 거래·추이를 보존하고 없는 달러 현금 행만 0으로 추가하며, 재실행해도 잔고를 초기화하지 않습니다. 예약 작업의 이름과 활성화 상태는 건드리지 않습니다. 자동 기록 계산 함수만 달러 현금을 환산하도록 갱신합니다.
+
+이전 거래에는 실제 환전 내역이 없어 달러 잔고를 역산하지 않습니다. 두 사용자는 각 본인 계좌에서 거래 기록 → 잔고조정을 선택하고, 증권사에서 확인한 실제 KRW/USD 예수금을 입력해야 합니다. 이 조정은 과거 추이를 바꾸지 않으며 조정 기록을 남깁니다. 새 미국주식 거래/수수료는 달러로, 국내 거래는 원화로 결제합니다. 환전의 출금액과 입금액은 실제 증권사 내역을 기준으로 입력합니다. 기존 거래의 원화 금액 표시를 새 달러 거래와 혼동하지 않도록 새 기록에 `cashAccounting: native-v2`를 저장합니다.
+
+앱 화면이 먼저 배포되어도 DB에 `cashAccounting: native-v2` 표시가 없으면 거래 입력을 막아 구버전 RPC가 달러 입금을 원화로 처리하지 않도록 합니다. UI 변경만으로 운영 DB가 자동 업그레이드되지는 않습니다.

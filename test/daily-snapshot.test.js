@@ -23,6 +23,7 @@ async function setup() {
     {id:'apple',owner:'A',account:'일반계좌',ticker:'AAPL',name:'Apple',quantity:2,price:10,costPrice:8,currency:'USD'},
     {id:'etf',owner:'B',account:'ISA',ticker:'KRX:381170',name:'ETF',quantity:3,price:20000,costPrice:10000,currency:'KRW'},
     {id:'cash-b',owner:'B',account:'ISA',ticker:'CASH',name:'현금',quantity:200000,price:1,costPrice:1,currency:'KRW'},
+    {id:'usd',owner:'A',account:'일반계좌',ticker:'CASH',name:'달러',quantity:20,price:1,costPrice:1,currency:'USD'},
     {id:'zero',owner:'A',account:'일반계좌',ticker:'GOOG',name:'Zero',quantity:0,price:10,costPrice:8,currency:'USD'}
   ]};
   await db.query('insert into public.portfolio_data values(1,$1::jsonb)',[JSON.stringify(seed)]);
@@ -67,9 +68,9 @@ test('07:30 schedule, no-write connectivity probe, capture-time valuation, concu
     await respond(run);
     await db.exec('select portfolio_private.settle_snapshots()');
     s=await state();
-    assert.equal(s.history.length,1); assert.equal(s.history[0].value,446000);
+    assert.equal(s.history.length,1); assert.equal(s.history[0].value,474000);
     assert.equal(s.history[0].source,'automatic'); assert.equal(s.history[0].fx,1400);
-    assert.equal(s.holdings[0].quantity,72000); assert.equal(s.holdings[1].quantity,3);
+    assert.equal(s.holdings[0].quantity,100000); assert.equal(s.holdings[1].quantity,3);
     assert.equal(s.holdings[1].price,20); assert.equal(s.holdings[2].price,30000);
     assert.equal(s.transactions.length,1); assert.equal(s.quoteSource,'automatic');
     assert.equal(s.automation.lastRun.status,'succeeded');
@@ -117,7 +118,7 @@ test('a newer manual price edit survives delayed automatic snapshot processing',
     await db.exec("update public.portfolio_data set payload=payload||jsonb_build_object('quoteUpdatedAt',clock_timestamp()+interval '1 second','fx',1500,'quoteSource','manual')");
     await respond(run);await db.exec('select portfolio_private.settle_snapshots()');
     const s=await state();assert.equal(s.fx,1500);assert.equal(s.quoteSource,'manual');assert.equal(s.holdings[1].price,10);
-    assert.equal(s.history[0].fx,1400);assert.equal(s.history[0].value,446000);
+    assert.equal(s.history[0].fx,1400);assert.equal(s.history[0].value,474000);
   } finally {await db.close();}
 });
 
