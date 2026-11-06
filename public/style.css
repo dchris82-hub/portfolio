@@ -20,3 +20,5 @@
 .valuation-cell .valuation-number{display:block;font-size:15px;line-height:1.5;font-variant-numeric:tabular-nums}.valuation-cell .valuation-native{font-weight:400}.valuation-cell .valuation-krw{font-weight:650}.valuation-cell>.valuation-krw:first-child{margin-top:0}
 
 .holdings-panel .asset-toolbar h2{font-size:22px}.holdings-panel th{font-size:16px}.holdings-panel .stock-cell strong{font-size:15px}.holdings-panel .stock-cell small{font-size:12px}.holdings-panel .holding-quantity,.holdings-panel .holding-price,.holdings-panel .purchase-price,.holdings-panel .purchase-amount{font-size:14px}.holdings-panel .valuation-native small{font-size:13px}@media(max-width:700px){.holdings-panel .asset-toolbar h2{font-size:20px}.holdings-panel th{font-size:15px}.holdings-panel .stock-cell strong{font-size:14px}.holdings-panel .holding-quantity,.holdings-panel .holding-price,.holdings-panel .purchase-price,.holdings-panel .purchase-amount{font-size:13px}}
+
+.holdings-panel .holding-owner,.holdings-panel .holding-return{font-size:13px}
