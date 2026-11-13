@@ -23,7 +23,7 @@ export function calculateFee(quantity, price, profile, currency) {
   const round=n=>Math[profile.rounding==='nearest'?'round':profile.rounding](Number((n*scale).toFixed(8)))/scale;
   const commission=round(gross*profile.commissionRate/100);
   const other=round(gross*profile.otherRate/100);
-  // Positive tax is rounded up to the native minimum monetary unit.
-  const tax=gross>0&&profile.taxRate>0 ? Math.ceil(Number((Math.max(gross*profile.taxRate/100,profile.minTax)*scale).toFixed(8)))/scale : 0;
+  // KRW transaction tax truncates fractions of a won; SEC fees round up to cents.
+  const tax=gross>0&&profile.taxRate>0 ? Math[currency==='USD'?'ceil':'floor'](Number((Math.max(gross*profile.taxRate/100,profile.minTax)*scale).toFixed(8)))/scale : 0;
   return {commission,other,tax,total:Number((commission+other+tax).toFixed(currency==='USD'?2:0))};
 }

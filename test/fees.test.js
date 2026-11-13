@@ -4,6 +4,7 @@ import { defaultFeeProfile, calculateFee, validateFeeProfile } from '../public/f
 test('reference KRX/NXT, ETF exemption, USD commission and minimum SEC tax',()=>{
   assert.deepEqual(calculateFee(100,100000,defaultFeeProfile('KRX','매수'),'KRW'),{commission:1500,other:0,tax:0,total:1500});
   assert.equal(calculateFee(100,100000,defaultFeeProfile('KRX','매도'),'KRW').total,21500);
+  assert.equal(calculateFee(1,12345,defaultFeeProfile('KRX','매도'),'KRW').tax,24);
   assert.equal(calculateFee(100,100000,defaultFeeProfile('NXT','매도'),'KRW').total,21450);
   assert.equal(calculateFee(100,100000,defaultFeeProfile('ETF','매도'),'KRW').tax,0);
   assert.equal(calculateFee(10,100,defaultFeeProfile('US','매수'),'USD').total,2.5);
