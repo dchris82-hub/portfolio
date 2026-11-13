@@ -176,6 +176,8 @@ function transactionModal(editTarget = null) {
   if (editTarget) {
     form.elements.type.value=editTarget.type;form.elements.account.value=editTarget.account;form.elements.account.disabled=true;
     form.elements.date.value=editTarget.date;form.elements.date.min=editTarget.date;form.elements.date.max=editTarget.date;form.elements.date.readOnly=true;
+  } else if (accounts.includes('일반계좌')) {
+    form.elements.account.value='일반계좌';
   }
   function fields() {
     const type = form.elements.type.value;
