@@ -1,10 +1,10 @@
-// Reference defaults, not a lookup of the user's negotiated brokerage contract.
+// User-confirmed fixed calculation rule. Previously saved profiles are not used by the UI.
 export function defaultFeeProfile(market, side) {
   return {
-    commissionRate: market === 'US' ? 0.25 : market === 'NXT' ? 0.0145 : 0.015,
+    commissionRate: 0.07,
     otherRate: 0,
-    taxRate: side === '매도' ? (market === 'US' ? 0.00206 : market === 'ETF' ? 0 : 0.20) : 0,
-    minTax: market === 'US' && side === '매도' ? 0.01 : 0,
+    taxRate: side === '매도' ? 0.00206 : 0,
+    minTax: 0,
     rounding: market === 'US' ? 'nearest' : 'floor'
   };
 }

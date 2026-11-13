@@ -169,50 +169,24 @@ function transactionModal() {
   if (cloudApi && data.cashAccounting !== 'native-v2') { toast('원화·달러 잔고 업그레이드 SQL을 Supabase에서 먼저 실행해 주세요.'); return; }
   const accounts = [...new Set(data.holdings.filter(h => h.owner === data.user).map(h => h.account))];
   openModal(`<div class="modal-head"><div><span class="eyebrow">A SMALL STEP FOR TOMORROW</span><h2>거래 기록하기</h2></div><button id="close-modal" class="icon-btn" aria-label="닫기">×</button></div><p class="muted">${esc(data.user)}님의 계좌에 기록합니다. 미국주식은 달러, 국내주식은 원화 잔고로 결제됩니다. 기존 잔고는 먼저 ‘잔고조정’으로 실제 예수금에 맞춰 주세요.</p><form id="transaction-form"><div class="form-grid"><label>거래 종류<select name="type">${['매수', '매도', '입금', '출금', '환전', '잔고조정'].map(t => `<option>${t}</option>`).join('')}</select></label><label>계좌<select name="account">${accounts.map(a => `<option>${esc(a)}</option>`).join('')}</select></label></div><label>거래일<input type="date" name="date" required value="${kday()}" min="${kday()}" max="${kday()}"></label><div id="trade-fields"></div><div class="trade-estimate" id="estimate"></div><p class="form-error" role="alert"></p><button class="btn primary wide">기록 저장하기 ${icon('arrow')}</button></form>`);
-  const form = $('#transaction-form'); let version = data.version;
+  const form = $('#transaction-form'), version = data.version;
   function fields() {
     const type = form.elements.type.value;
     $('#trade-fields').innerHTML = ['입금', '출금'].includes(type) ? '<label>통화<select name="currency"><option value="KRW">원화 KRW</option><option value="USD">달러 USD</option></select></label><label>금액 (선택 통화)<input name="amount" type="number" min="0.000001" step="any" required inputmode="decimal" placeholder="0"></label>' : `<label>종목 티커<input name="ticker" required maxlength="20" list="tickers" placeholder="예: AAPL 또는 KRX:381170" autocomplete="off"></label><datalist id="tickers">${[...new Map(data.holdings.filter(h => h.ticker !== 'CASH').map(h => [h.ticker, h])).values()].map(h => `<option value="${esc(h.ticker)}">${esc(h.name)}</option>`).join('')}</datalist><label>종목명<input name="name" maxlength="100" placeholder="신규 종목이면 입력하세요"></label><div class="form-grid"><label>수량 (주)<input name="quantity" type="number" min="0.000001" step="any" required inputmode="decimal" placeholder="0"></label><label>거래 단가 <span id="currency-label">($ / 원)</span><input name="price" type="number" min="0.000001" step="any" required inputmode="decimal" placeholder="0"></label><label>수수료·세금 <span id="fee-currency-label">(원 / $)</span><input name="fee" type="number" min="0" step="any" inputmode="decimal" value="0"></label></div>`;
     if (['매수','매도'].includes(type)) {
-      $('#trade-fields').insertAdjacentHTML('beforeend', `<label id="fee-market-label" hidden>국내 상품 유형·시장<select name="feeMarket"><option value="">선택해 주세요</option><option value="KRX">국내 일반주식 · KRX</option><option value="NXT">국내 일반주식 · NXT</option><option value="ETF">국내 ETF·ETN</option></select></label><label class="fee-auto-label"><input name="feeAuto" type="checkbox" checked> 수수료·세금 자동 계산</label><p id="fee-breakdown" class="muted" aria-live="polite"></p><details class="fee-details"><summary>키움 요율 확인·수정</summary><p class="muted">일반 온라인 참고값입니다. 실제 계좌의 우대 요율을 확인하세요. 요율 저장은 현재 계좌·시장·매수/매도에만 적용됩니다. 배당·양도소득세율을 거래금액 기준 요율에 넣지 마세요. 제비용이 기본 요율에 포함되면 별도로 더하지 마세요.</p><div id="fee-profile-fields"></div><button id="save-fee-profile" type="button" class="btn secondary wide">이 계좌·거래 유형의 요율 저장</button><p id="fee-profile-status" class="muted" role="status"></p></details>`);
-      let previousKey='';
-      function currentMarket() { return form.elements.ticker.value.trim().toUpperCase().startsWith('KRX:') ? form.elements.feeMarket.value : 'US'; }
-      function feeKey() { return `${form.elements.account.value}|${currentMarket()}|${type}`; }
-      function profileFields(profile) {
-        $('#fee-profile-fields').innerHTML=['commissionRate','otherRate','taxRate','minTax'].map((key,i)=>`<label>${['매매 수수료율 (%)','별도 제비용율 (%) · 중복 가산 주의','거래금액 기준 세금·SEC율 (%)','최소 세금 (거래 통화)'][i]}<input data-fee-profile="${key}" type="number" min="0" max="${key==='minTax'?1000000:100}" step="any" inputmode="decimal" value="${profile[key]}"></label>`).join('')+`<label>수수료 단위 처리<select data-fee-profile="rounding"><option value="nearest">반올림</option><option value="floor">절사</option><option value="ceil">올림</option></select></label>`;
-        $('[data-fee-profile="rounding"]').value=profile.rounding;
-      }
-      function readProfile() { return Object.fromEntries([...form.querySelectorAll('[data-fee-profile]')].map(e=>[e.dataset.feeProfile,e.dataset.feeProfile==='rounding'?e.value:(e.value===''?NaN:Number(e.value))])); }
+      $('#trade-fields').insertAdjacentHTML('beforeend', `<label class="fee-auto-label"><input name="feeAuto" type="checkbox" checked> 수수료·세금 자동 계산</label><p class="muted">지정 계산 기준: 매수·매도 수수료 0.07% · 매도 세금 0.00206%</p><p id="fee-breakdown" class="muted" aria-live="polite"></p>`);
       function updateFee() {
+        if (!form.elements.feeAuto.checked) { $('#fee-breakdown').textContent='직접 입력 모드 · 실제 거래 비용 합계를 입력하세요.';return; }
         const domestic=form.elements.ticker.value.trim().toUpperCase().startsWith('KRX:');
-        $('#fee-market-label').hidden=!domestic;form.elements.feeMarket.required=domestic;
-        const key=feeKey(), market=currentMarket();
-        if (key!==previousKey) {
-          const stored=data.feeProfiles?.[data.user]?.[key];
-          profileFields(stored||defaultFeeProfile(market||'KRX',type));previousKey=key;
-          $('#fee-profile-status').textContent=stored?'저장된 계좌 요율 적용 중':'참고 요율 · 계좌 우대율을 확인해 주세요.';
-        }
-        if (!form.elements.feeAuto.checked) { $('#fee-breakdown').textContent='직접 입력 모드 · 실제 거래내역의 수수료·세금 합계를 입력하세요.'; return; }
-        if (domestic&&!market) { form.elements.fee.value='';$('#fee-breakdown').textContent='국내 일반주식과 ETF는 세금이 다릅니다. 상품 유형을 선택하세요.';return; }
         try {
-          const result=calculateFee(Number(form.elements.quantity.value||0),Number(form.elements.price.value||0),readProfile(),domestic?'KRW':'USD');
+          const result=calculateFee(Number(form.elements.quantity.value||0),Number(form.elements.price.value||0),defaultFeeProfile(domestic?'KRX':'US',type),domestic?'KRW':'USD');
           form.elements.fee.value=result.total;
-          $('#fee-breakdown').textContent=`자동 계산 예상치: 수수료 ${num(result.commission)} + 별도 비용 ${num(result.other)} + 세금 ${num(result.tax)} ${domestic?'KRW':'USD'}. 실제 청구액과 다르면 금액을 직접 수정하세요.${market==='ETF'&&type==='매도' ? ' 해외자산형 ETF의 배당소득세 등은 자동 산출에 포함되지 않습니다.' : ''}`;
-        } catch(e) { form.elements.fee.value='';$('#fee-breakdown').textContent=e.message; }
+          $('#fee-breakdown').textContent=`수수료 ${num(result.commission)} + 세금 ${num(result.tax)} = ${num(result.total)} ${domestic?'KRW':'USD'}`;
+        } catch(e) {form.elements.fee.value='';$('#fee-breakdown').textContent=e.message;}
       }
       form.elements.fee.required=true;
       form.elements.fee.addEventListener('input',()=>{form.elements.feeAuto.checked=false;updateFee();});
       form._updateFee=updateFee;
-      $('#save-fee-profile').onclick=async()=>{
-        const button=$('#save-fee-profile');button.disabled=true;
-        try {
-          if (!form.elements.ticker.value.trim() || !currentMarket()) throw Error('티커와 국내 상품 유형을 먼저 선택해 주세요.');
-          const profile=readProfile();calculateFee(1,1,profile,currentMarket()==='US'?'USD':'KRW');
-          data=await api('fees',{version,account:form.elements.account.value,market:currentMarket(),side:type,profile});version=data.version;
-          $('#fee-profile-status').textContent='현재 계좌·거래 유형의 요율을 저장했습니다.';
-        } catch(e) { $('#fee-profile-status').textContent=e.message; }
-        finally {button.disabled=false;}
-      };
     } else form._updateFee=null;
     if (type==='환전') $('#trade-fields').innerHTML='<label>환전 방향<select name="fromCurrency"><option value="KRW">원화 → 달러</option><option value="USD">달러 → 원화</option></select></label><label>보낸 금액 (보내는 통화 · 수수료 포함)<input name="amount" type="number" min="0.000001" step="any" required inputmode="decimal"></label><label>실제로 받은 금액 (받는 통화 · 수수료 차감 후)<input name="received" type="number" min="0.000001" step="any" required inputmode="decimal"></label><p class="muted">증권사 환전 내역의 출금액과 입금액을 입력하세요. 실제 적용 환율과 수수료가 함께 반영됩니다.</p>';
     if (type==='잔고조정') {
