@@ -8,19 +8,32 @@ declare
   v_type text; v_account text; v_ticker text; v_currency text;
   v_quantity numeric; v_price numeric; v_fx numeric; v_fee numeric; v_fee_krw numeric;
   v_gross numeric; v_amount numeric; v_cash numeric; v_old_quantity numeric; v_cost numeric; v_value numeric;
-  v_pair record; v_native text; v_krw_i integer; v_usd_i integer; v_krw numeric; v_usd numeric; v_received numeric; v_before jsonb;
+  v_pair record; v_native text; v_krw_i integer; v_usd_i integer; v_krw numeric; v_usd numeric; v_received numeric; v_before jsonb; v_profile jsonb; v_key text; v_field text;
 begin
   select owner into v_owner from public.portfolio_members where user_id = auth.uid();
   if v_owner is null then raise exception using errcode = '42501', message = '등록된 가족 계정만 이용할 수 있습니다.'; end if;
   if jsonb_typeof(p_entry) is distinct from 'object' or octet_length(p_entry::text) > 32000 then raise exception '요청 형식을 확인해 주세요.'; end if;
-  if p_action not in ('transactions', 'prices', 'snapshot') or p_action is null then raise exception '지원하지 않는 요청입니다.'; end if;
+  if p_action not in ('transactions', 'prices', 'snapshot', 'fees') or p_action is null then raise exception '지원하지 않는 요청입니다.'; end if;
   select payload into s from public.portfolio_data where id = 1 for update;
   if s is null then raise exception '초기 자산 데이터가 아직 등록되지 않았습니다.'; end if;
   if jsonb_typeof(p_entry->'version') is distinct from 'number' or p_entry->'version' is distinct from s->'version' then
     raise exception using errcode = '40001', message = '다른 기기에서 변경되었습니다. 창을 닫고 최신 정보를 확인한 후 다시 입력해 주세요.';
   end if;
   hs := s->'holdings';
-  if p_action = 'transactions' then
+  if p_action = 'fees' then
+    v_account:=p_entry->>'account';
+    if not exists(select 1 from jsonb_array_elements(hs) fee_asset where fee_asset->>'owner'=v_owner and fee_asset->>'account'=v_account) then raise exception '본인 계좌를 확인해 주세요.'; end if;
+    if p_entry->>'market' is null or p_entry->>'market' not in ('KRX','NXT','ETF','US') or p_entry->>'side' is null or p_entry->>'side' not in ('매수','매도') then raise exception '시장과 거래 종류를 확인해 주세요.'; end if;
+    v_profile:=p_entry->'profile';
+    if jsonb_typeof(v_profile) is distinct from 'object' or v_profile->>'rounding' is null or v_profile->>'rounding' not in ('nearest','floor','ceil') then raise exception '요율 설정을 확인해 주세요.'; end if;
+    foreach v_field in array array['commissionRate','otherRate','taxRate','minTax'] loop
+      v_amount:=portfolio_private.number(v_profile->v_field,'수수료율',true);
+      if v_amount > (case when v_field='minTax' then 1000000 else 100 end) then raise exception '요율 설정 범위를 확인해 주세요.'; end if;
+    end loop;
+    v_profile:=jsonb_build_object('commissionRate',v_profile->'commissionRate','otherRate',v_profile->'otherRate','taxRate',v_profile->'taxRate','minTax',v_profile->'minTax','rounding',v_profile->'rounding');
+    v_key:=v_account||'|'||(p_entry->>'market')||'|'||(p_entry->>'side');
+    s:=s||jsonb_build_object('feeProfiles',coalesce(s->'feeProfiles','{}'::jsonb)||jsonb_build_object(v_owner,coalesce(s#>array['feeProfiles',v_owner],'{}'::jsonb)||jsonb_build_object(v_key,v_profile)));
+  elsif p_action = 'transactions' then
     v_type := p_entry->>'type'; v_account := p_entry->>'account';
     if v_type in ('입금','출금') and p_entry ? 'currency' and p_entry->>'currency' not in ('KRW','USD') then raise exception '입출금 통화를 확인해 주세요.'; end if;
     if v_type is null or v_type not in ('매수', '매도', '입금', '출금', '환전', '잔고조정') then raise exception '거래 종류를 선택해 주세요.'; end if;

@@ -1,3 +1,4 @@
+import { validateFeeProfile } from './public/fees.js';
 import http from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { randomBytes, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
@@ -36,7 +37,7 @@ const readBody = async req => {
   try { return JSON.parse(body || '{}'); } catch { throw Error('요청 형식이 올바르지 않습니다.'); }
 };
 const attempts = new Map();
-const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'], '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'], '/icon.svg': ['icon.svg', 'image/svg+xml'] };
+const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'], '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'], '/icon.svg': ['icon.svg', 'image/svg+xml'], '/fees.js': ['fees.js','text/javascript'] };
 
 const server = http.createServer(async (req, res) => {
   res.setHeader('X-Content-Type-Options', 'nosniff');
@@ -107,13 +108,18 @@ const server = http.createServer(async (req, res) => {
       const headers = url.pathname.endsWith('export') ? { 'Content-Disposition': 'attachment; filename="portfolio-backup.json"' } : {};
       return send(res, 200, { ...state(), user: session.name }, headers);
     }
-    if (req.method !== 'POST' || !['/api/transactions', '/api/prices', '/api/snapshot'].includes(url.pathname)) return send(res, 404, { error: '기능을 찾을 수 없습니다.' });
+    if (req.method !== 'POST' || !['/api/transactions', '/api/prices', '/api/snapshot', '/api/fees'].includes(url.pathname)) return send(res, 404, { error: '기능을 찾을 수 없습니다.' });
     const b = await readBody(req);
     db.exec('BEGIN IMMEDIATE');
     try {
       const s = state();
       if (b.version !== s.version) { db.exec('ROLLBACK'); return send(res, 409, { error: '다른 기기에서 변경되었습니다. 최신 정보를 확인한 후 다시 입력해 주세요.' }); }
-      if (url.pathname.endsWith('transactions')) {
+      if (url.pathname.endsWith('fees')) {
+        if (!s.holdings.some(h=>h.owner===session.name&&h.account===b.account) || !['KRX','NXT','ETF','US'].includes(b.market) || !['매수','매도'].includes(b.side)) throw Error('계좌와 거래 유형을 확인해 주세요.');
+        const profile=validateFeeProfile(b.profile);
+        s.feeProfiles ||= {};s.feeProfiles[session.name] ||= {};
+        s.feeProfiles[session.name][b.account+'|'+b.market+'|'+b.side]=profile;
+      } else if (url.pathname.endsWith('transactions')) {
         const entry = transact(s, b, session.name);
         s.transactions.push({ ...entry, id: randomBytes(12).toString('hex'), createdAt: new Date().toISOString(), imported: false });
       } else if (url.pathname.endsWith('prices')) {

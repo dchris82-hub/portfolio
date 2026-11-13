@@ -117,5 +117,17 @@ test('Supabase SQL: RLS, two-member authorization, atomic trades and USD fees', 
     assert.equal(upgraded.transactions.at(-1).after.USD,1234.5);
     upgraded=await mutate(a,'transactions',{type:'출금',account:'일반계좌',date:today(),currency:'USD',amount:34.5,version:upgraded.version});
     assert.equal(usd(upgraded),1200);assert.equal(upgraded.holdings[0].quantity,123450);
+    const feesMigration=readFileSync(new URL('../supabase/fee-profiles.sql',import.meta.url),'utf8');
+    await db.exec(feesMigration);
+    const profile={commissionRate:0.07,otherRate:0,taxRate:0,minTax:0,rounding:'nearest'};
+    const fees={account:'일반계좌',market:'US',side:'매수',profile,version:upgraded.version};
+    await assert.rejects(mutate(b,'fees',fees),/본인 계좌/);
+    upgraded=await mutate(a,'fees',fees);
+    assert.equal(upgraded.feeProfiles['사용자A']['일반계좌|US|매수'].commissionRate,0.07);
+    const beforeBad=upgraded.version;
+    await assert.rejects(mutate(a,'fees',{...fees,version:beforeBad,profile:{...profile,taxRate:101}}),/범위/);
+    assert.equal((await get(a)).version,beforeBad);
+    await db.exec(feesMigration);
+    assert.equal((await get(a)).feeProfiles['사용자A']['일반계좌|US|매수'].commissionRate,0.07);
   } finally { await db.close(); }
 });

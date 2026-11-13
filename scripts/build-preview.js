@@ -12,6 +12,7 @@ if (seed.owners?.length !== 2 || !Array.isArray(seed.holdings)) throw Error('Inv
 seed.user = seed.owners[0];
 const css = readFileSync(path.join(root, 'public/style.css'), 'utf8');
 let app = readFileSync(path.join(root, 'public/app.js'), 'utf8');
+app=app.replace("const { defaultFeeProfile, calculateFee } = await import('./fees.js');",readFileSync(path.join(root,'public/fees.js'),'utf8').replaceAll('export ',''));
 const domain = readFileSync(path.join(root, 'lib.js'), 'utf8').replaceAll('export ', '').replaceAll('crypto.randomUUID()', "('preview-' + Date.now() + '-' + Math.random().toString(36).slice(2))");
 const apiStart = app.indexOf('async function api(url, body) {');
 const apiEnd = app.indexOf('\nfunction authScreen(status)', apiStart);
@@ -24,10 +25,12 @@ async function api(url, body) {
   if (url === 'status') return { initialized: true, user: previewState.user };
   if (url === 'state') return structuredClone(previewState);
   if (url === 'logout') { toast('미리보기입니다. 위쪽 사용자 전환으로 다른 소유자의 화면을 확인하세요.'); return {}; }
-  if (!['transactions', 'prices', 'snapshot'].includes(url)) throw Error('미리보기에서 지원하지 않는 기능입니다.');
+  if (!['transactions', 'prices', 'snapshot', 'fees'].includes(url)) throw Error('미리보기에서 지원하지 않는 기능입니다.');
   if (body.version !== previewState.version) throw Error('화면을 새로 고침한 뒤 다시 입력해 주세요.');
   const next = structuredClone(previewState);
-  if (url === 'transactions') {
+  if (url === 'fees') {
+    next.feeProfiles ||= {}; next.feeProfiles[next.user] ||= {}; next.feeProfiles[next.user][body.account+'|'+body.market+'|'+body.side]=body.profile;
+  } else if (url === 'transactions') {
     const entry = previewDomain.transact(next, body, next.user);
     next.transactions.push({ ...entry, id: 'preview-' + Date.now(), createdAt: new Date().toISOString(), imported: false });
   } else if (url === 'prices') {

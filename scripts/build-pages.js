@@ -6,12 +6,12 @@ import { fileURLToPath } from 'node:url';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const config = JSON.parse(readFileSync(path.join(root, 'deploy-config.json'), 'utf8'));
 if (config.backend !== 'supabase' || !/^https:\/\/[a-z0-9]+\.supabase\.co$/.test(config.url) || !/^sb_publishable_[A-Za-z0-9_-]+$/.test(config.publishableKey)) throw Error('공개용 Supabase 연결 설정을 확인해 주세요.');
-const revision = createHash('sha256').update(readFileSync(fileURLToPath(import.meta.url),'utf8') + JSON.stringify(config) + ['app.js','style.css','supabase-client.js'].map(f => readFileSync(path.join(root,'public',f),'utf8')).join('')).digest('hex').slice(0,12);
+const revision = createHash('sha256').update(readFileSync(fileURLToPath(import.meta.url),'utf8') + JSON.stringify(config) + ['app.js','style.css','supabase-client.js','fees.js'].map(f => readFileSync(path.join(root,'public',f),'utf8')).join('')).digest('hex').slice(0,12);
 // Explicit allowlist: never copy source checkouts, Excel, SQL imports, previews or DBs.
 const out = path.join(root, 'site');
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out);
-for (const file of ['app.js', 'style.css', 'icon.svg', 'manifest.webmanifest', 'supabase-client.js']) copyFileSync(path.join(root, 'public', file), path.join(out, file));
+for (const file of ['app.js', 'style.css', 'icon.svg', 'manifest.webmanifest', 'supabase-client.js', 'fees.js']) copyFileSync(path.join(root, 'public', file), path.join(out, file));
 const manifest = JSON.parse(readFileSync(path.join(out, 'manifest.webmanifest'), 'utf8'));
 manifest.start_url = './'; manifest.scope = './';
 for (const i of manifest.icons) i.src = './' + i.src.replace(/^\//, '');
@@ -24,10 +24,11 @@ for (const file of ['app.js','style.css','config.js']) {
   html=html.replaceAll(`./${file}"`, `./${name}.${revision}.${extension}"`);
 }
 writeFileSync(path.join(out,'app.js'),readFileSync(path.join(out,'app.js'),'utf8').replace("import('./supabase-client.js')", `import('./supabase-client.${revision}.js')`));
+writeFileSync(path.join(out,'app.js'),readFileSync(path.join(out,'app.js'),'utf8').replace("import('./fees.js')", `import('./fees.${revision}.js')`));
 html = html.replace('</head>', `<meta name="app-build" content="${revision}"></head>`);
 writeFileSync(path.join(out, 'index.html'), html);
 writeFileSync(path.join(out, 'config.js'), `window.PORTFOLIO_CONFIG = Object.freeze(${JSON.stringify(config)});\n`);
-for (const file of ['app.js','style.css','config.js','supabase-client.js']) {
+for (const file of ['app.js','style.css','config.js','supabase-client.js','fees.js']) {
   const [name,extension]=file.split('.');
   copyFileSync(path.join(out,file),path.join(out,`${name}.${revision}.${extension}`));
 }
