@@ -10,6 +10,7 @@ if (!input) throw Error('Usage: node scripts/build-preview.js /private/path/seed
 const seed = JSON.parse(readFileSync(path.resolve(input), 'utf8'));
 if (seed.owners?.length !== 2 || !Array.isArray(seed.holdings)) throw Error('Invalid seed');
 seed.user = seed.owners[0];
+seed.transactionEditingVersion=1;
 const css = readFileSync(path.join(root, 'public/style.css'), 'utf8');
 let app = readFileSync(path.join(root, 'public/app.js'), 'utf8');
 app=app.replace("const { defaultFeeProfile, calculateFee } = await import('./fees.js');",readFileSync(path.join(root,'public/fees.js'),'utf8').replaceAll('export ',''));
@@ -19,16 +20,18 @@ const apiEnd = app.indexOf('\nfunction authScreen(status)', apiStart);
 if (apiStart < 0 || apiEnd < 0) throw Error('App entry changed: update preview builder');
 const adapter = `
 const previewInitial = ${JSON.stringify(seed).replaceAll('<', '\\u003c')};
-const previewDomain = (() => { ${domain}; return { transact, today, totalOf }; })();
+const previewDomain = (() => { ${domain}; return { transact, changeTransaction, today, totalOf }; })();
 let previewState = structuredClone(previewInitial);
 async function api(url, body) {
   if (url === 'status') return { initialized: true, user: previewState.user };
   if (url === 'state') return structuredClone(previewState);
   if (url === 'logout') { toast('미리보기입니다. 위쪽 사용자 전환으로 다른 소유자의 화면을 확인하세요.'); return {}; }
-  if (!['transactions', 'prices', 'snapshot', 'fees'].includes(url)) throw Error('미리보기에서 지원하지 않는 기능입니다.');
+  if (!['transactions', 'prices', 'snapshot', 'fees', 'edit_transaction', 'delete_transaction'].includes(url)) throw Error('미리보기에서 지원하지 않는 기능입니다.');
   if (body.version !== previewState.version) throw Error('화면을 새로 고침한 뒤 다시 입력해 주세요.');
   const next = structuredClone(previewState);
-  if (url === 'fees') {
+  if (url === 'edit_transaction' || url === 'delete_transaction') {
+    previewDomain.changeTransaction(next,body.id,url==='delete_transaction'?null:body.replacement,next.user);
+  } else if (url === 'fees') {
     next.feeProfiles ||= {}; next.feeProfiles[next.user] ||= {}; next.feeProfiles[next.user][body.account+'|'+body.market+'|'+body.side]=body.profile;
   } else if (url === 'transactions') {
     const entry = previewDomain.transact(next, body, next.user);

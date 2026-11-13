@@ -65,44 +65,22 @@ begin
   insert into public.portfolio_members(user_id, owner) values (v_uid, p_owner);
 end $$;
 
-create or replace function public.portfolio_mutate(p_action text, p_entry jsonb)
-returns jsonb language plpgsql security definer set search_path = '' as $$
+create or replace function portfolio_private.apply_transaction(p_state jsonb,p_entry jsonb,p_owner text,p_replay boolean default false)
+returns jsonb language plpgsql security invoker set search_path='' as $$
 declare
-  s jsonb; v_owner text; v_today text := to_char(current_timestamp at time zone 'Asia/Seoul', 'YYYY-MM-DD');
+  s jsonb:=p_state; v_owner text:=p_owner; v_today text := to_char(current_timestamp at time zone 'Asia/Seoul', 'YYYY-MM-DD');
   hs jsonb; h jsonb; cash jsonb; tx jsonb; v_index integer; v_cash_index integer;
   v_type text; v_account text; v_ticker text; v_currency text;
   v_quantity numeric; v_price numeric; v_fx numeric; v_fee numeric; v_fee_krw numeric;
   v_gross numeric; v_amount numeric; v_cash numeric; v_old_quantity numeric; v_cost numeric; v_value numeric;
-  v_pair record; v_native text; v_krw_i integer; v_usd_i integer; v_krw numeric; v_usd numeric; v_received numeric; v_before jsonb; v_profile jsonb; v_key text; v_field text;
+  v_pair record; v_native text; v_krw_i integer; v_usd_i integer; v_krw numeric; v_usd numeric; v_received numeric; v_before jsonb; v_profile jsonb; v_key text; v_field text; v_account_before jsonb;
 begin
-  select owner into v_owner from public.portfolio_members where user_id = auth.uid();
-  if v_owner is null then raise exception using errcode = '42501', message = '등록된 가족 계정만 이용할 수 있습니다.'; end if;
-  if jsonb_typeof(p_entry) is distinct from 'object' or octet_length(p_entry::text) > 32000 then raise exception '요청 형식을 확인해 주세요.'; end if;
-  if p_action not in ('transactions', 'prices', 'snapshot', 'fees') or p_action is null then raise exception '지원하지 않는 요청입니다.'; end if;
-  select payload into s from public.portfolio_data where id = 1 for update;
-  if s is null then raise exception '초기 자산 데이터가 아직 등록되지 않았습니다.'; end if;
-  if jsonb_typeof(p_entry->'version') is distinct from 'number' or p_entry->'version' is distinct from s->'version' then
-    raise exception using errcode = '40001', message = '다른 기기에서 변경되었습니다. 창을 닫고 최신 정보를 확인한 후 다시 입력해 주세요.';
-  end if;
-  hs := s->'holdings';
-  if p_action = 'fees' then
-    v_account:=p_entry->>'account';
-    if not exists(select 1 from jsonb_array_elements(hs) fee_asset where fee_asset->>'owner'=v_owner and fee_asset->>'account'=v_account) then raise exception '본인 계좌를 확인해 주세요.'; end if;
-    if p_entry->>'market' is null or p_entry->>'market' not in ('KRX','NXT','ETF','US') or p_entry->>'side' is null or p_entry->>'side' not in ('매수','매도') then raise exception '시장과 거래 종류를 확인해 주세요.'; end if;
-    v_profile:=p_entry->'profile';
-    if jsonb_typeof(v_profile) is distinct from 'object' or v_profile->>'rounding' is null or v_profile->>'rounding' not in ('nearest','floor','ceil') then raise exception '요율 설정을 확인해 주세요.'; end if;
-    foreach v_field in array array['commissionRate','otherRate','taxRate','minTax'] loop
-      v_amount:=portfolio_private.number(v_profile->v_field,'수수료율',true);
-      if v_amount > (case when v_field='minTax' then 1000000 else 100 end) then raise exception '요율 설정 범위를 확인해 주세요.'; end if;
-    end loop;
-    v_profile:=jsonb_build_object('commissionRate',v_profile->'commissionRate','otherRate',v_profile->'otherRate','taxRate',v_profile->'taxRate','minTax',v_profile->'minTax','rounding',v_profile->'rounding');
-    v_key:=v_account||'|'||(p_entry->>'market')||'|'||(p_entry->>'side');
-    s:=s||jsonb_build_object('feeProfiles',coalesce(s->'feeProfiles','{}'::jsonb)||jsonb_build_object(v_owner,coalesce(s#>array['feeProfiles',v_owner],'{}'::jsonb)||jsonb_build_object(v_key,v_profile)));
-  elsif p_action = 'transactions' then
+  hs:=s->'holdings';
     v_type := p_entry->>'type'; v_account := p_entry->>'account';
+    select coalesce(jsonb_agg(before_h),'[]'::jsonb) into v_account_before from jsonb_array_elements(hs) before_h where before_h->>'owner'=v_owner and before_h->>'account'=v_account;
     if v_type in ('입금','출금') and p_entry ? 'currency' and p_entry->>'currency' not in ('KRW','USD') then raise exception '입출금 통화를 확인해 주세요.'; end if;
     if v_type is null or v_type not in ('매수', '매도', '입금', '출금', '환전', '잔고조정') then raise exception '거래 종류를 선택해 주세요.'; end if;
-    if p_entry->>'date' is distinct from v_today then raise exception '새 거래는 오늘 날짜로 입력해 주세요.'; end if;
+    if (not p_replay and p_entry->>'date' is distinct from v_today) or (p_replay and (p_entry->>'date' is null or p_entry->>'date' !~ '^\d{4}-\d{2}-\d{2}$' or p_entry->>'date'>v_today)) then raise exception '새 거래는 오늘 날짜로 입력해 주세요.'; end if;
     v_native := case when v_type in ('입금','출금') then case when p_entry->>'currency'='USD' then 'USD' else 'KRW' end
       when upper(trim(p_entry->>'ticker')) like 'KRX:%' then 'KRW' else 'USD' end;
     select (e.ordinality-1)::integer into v_krw_i from jsonb_array_elements(hs) with ordinality e(value,ordinality)
@@ -140,14 +118,14 @@ begin
       hs:=jsonb_set(hs,array[v_krw_i::text,'quantity'],to_jsonb(v_krw));
       hs:=jsonb_set(hs,array[v_usd_i::text,'quantity'],to_jsonb(v_usd));
       v_cash_index:=v_krw_i;v_cash:=v_krw;
-      tx:=jsonb_build_object('type',v_type,'owner',v_owner,'account',v_account,'ticker','CASH','name',v_type,'date',v_today,
+      tx:=jsonb_build_object('type',v_type,'owner',v_owner,'account',v_account,'ticker','CASH','name',v_type,'date',p_entry->>'date',
         'before',v_before,'after',jsonb_build_object('KRW',v_krw,'USD',v_usd),'amount',coalesce(v_amount,0),
         'currency',coalesce(p_entry->>'fromCurrency','KRW'),'received',v_received,'receivedCurrency',case when p_entry->>'fromCurrency'='KRW' then 'USD' else 'KRW' end);
     elsif v_type in ('입금', '출금') then
       v_amount := portfolio_private.number(p_entry->'amount', '금액');
       if v_type = '출금' and v_cash < v_amount then raise exception '출금 가능한 현금이 부족합니다.'; end if;
       v_cash := v_cash + case when v_type = '입금' then v_amount else -v_amount end;
-      tx := jsonb_build_object('type', v_type, 'owner', v_owner, 'account', v_account, 'ticker', 'CASH', 'name', '현금', 'quantity', v_amount, 'price', 1, 'currency', v_native, 'amount', v_amount, 'date', v_today);
+      tx := jsonb_build_object('type', v_type, 'owner', v_owner, 'account', v_account, 'ticker', 'CASH', 'name', '현금', 'quantity', v_amount, 'price', 1, 'currency', v_native, 'amount', v_amount, 'date', p_entry->>'date');
     else
       v_ticker := upper(trim(coalesce(p_entry->>'ticker', '')));
       if v_ticker !~ '^(KRX:[0-9]{6}|[A-Z][A-Z0-9.\-]{0,14})$' or v_ticker = 'CASH' then raise exception '티커를 확인해 주세요. 국내 종목은 KRX:종목코드 형식입니다.'; end if;
@@ -178,11 +156,130 @@ begin
         v_cash := v_cash + v_amount;
       end if;
       hs := jsonb_set(hs, array[v_index::text], h);
-      tx := jsonb_build_object('type', v_type, 'owner', v_owner, 'account', v_account, 'ticker', v_ticker, 'name', h->>'name', 'quantity', v_quantity, 'price', v_price, 'currency', v_currency, 'fee', v_fee, 'feeCurrency', v_currency, 'amount', v_amount, 'date', v_today);
+      tx := jsonb_build_object('type', v_type, 'owner', v_owner, 'account', v_account, 'ticker', v_ticker, 'name', h->>'name', 'quantity', v_quantity, 'price', v_price, 'currency', v_currency, 'fee', v_fee, 'feeCurrency', v_currency, 'amount', v_amount, 'date', p_entry->>'date');
     end if;
     hs := jsonb_set(hs, array[v_cash_index::text, 'quantity'], to_jsonb(v_cash));
-    tx := tx || jsonb_build_object('id', gen_random_uuid()::text, 'createdAt', current_timestamp, 'imported', false, 'cashAccounting','native-v2');
+    tx := tx || jsonb_build_object('id', gen_random_uuid()::text, 'createdAt', current_timestamp, 'imported', false, 'cashAccounting','native-v2','accountBefore',v_account_before);
     s := s || jsonb_build_object('holdings', hs, 'transactions', (s->'transactions') || jsonb_build_array(tx));
+  return s;
+end $$;
+
+create or replace function portfolio_private.change_transaction(p_state jsonb,p_id text,p_replacement jsonb,p_owner text)
+returns jsonb language plpgsql security invoker set search_path='' as $$
+declare
+ s jsonb:=p_state; original jsonb; old jsonb; entry jsonb; before_hs jsonb; restored jsonb; latest jsonb; global_prices jsonb; next_tx jsonb; changed jsonb;
+ idx integer; cash_idx integer; stock_idx integer; krw_idx integer; usd_idx integer; last_idx integer;
+ h jsonb; cash jsonb; qty numeric; basis numeric; balance numeric; account_name text;
+begin
+ select (item.n-1)::integer,item.value into idx,original from jsonb_array_elements(s->'transactions') with ordinality item(value,n) where item.value->>'id'=p_id;
+ if original is null or original->>'owner' is distinct from p_owner or original->>'cashAccounting' is distinct from 'native-v2' or coalesce((original->>'imported')::boolean,false) then
+   raise exception using errcode='42501',message='본인이 앱에 입력한 원화·달러 거래만 수정·삭제할 수 있습니다.';
+ end if;
+ if p_replacement is not null and jsonb_typeof(p_replacement) is distinct from 'object' then raise exception '수정 내용을 확인해 주세요.'; end if;
+ account_name:=original->>'account';before_hs:=original->'accountBefore';
+ if jsonb_typeof(before_hs) is distinct from 'array' then
+   if exists(select 1 from jsonb_array_elements(s->'transactions') with ordinality later(value,n)
+     where later.n>idx+1 and later.value->>'owner'=p_owner and later.value->>'account'=account_name) then
+     raise exception '이전 형식의 거래입니다. 같은 계좌의 이후 거래를 먼저 정정해 주세요.';
+   end if;
+   select coalesce(jsonb_agg(b),'[]'::jsonb) into before_hs from jsonb_array_elements(s->'holdings') b where b->>'owner'=p_owner and b->>'account'=account_name;
+   if original->>'type' in ('환전','잔고조정') then
+     select (x.n-1)::integer into krw_idx from jsonb_array_elements(before_hs) with ordinality x(value,n) where x.value->>'ticker'='CASH' and x.value->>'currency'='KRW';
+     select (x.n-1)::integer into usd_idx from jsonb_array_elements(before_hs) with ordinality x(value,n) where x.value->>'ticker'='CASH' and x.value->>'currency'='USD';
+     if original->'before' is null or krw_idx is null or usd_idx is null then raise exception '이 거래의 이전 잔고를 안전하게 복원할 수 없습니다.'; end if;
+     before_hs:=jsonb_set(before_hs,array[krw_idx::text,'quantity'],original#>'{before,KRW}');
+     before_hs:=jsonb_set(before_hs,array[usd_idx::text,'quantity'],original#>'{before,USD}');
+   else
+     select (x.n-1)::integer,x.value into cash_idx,cash from jsonb_array_elements(before_hs) with ordinality x(value,n)
+       where x.value->>'ticker'='CASH' and x.value->>'currency'=original->>'currency';
+     if cash_idx is null then raise exception '거래 통화의 현금 잔고를 찾을 수 없습니다.'; end if;
+     balance:=(cash->>'quantity')::numeric + case when original->>'type' in ('매수','출금') then (original->>'amount')::numeric else -(original->>'amount')::numeric end;
+     if balance < -1e-8 then raise exception '이전 잔고를 복원하면 현금이 부족합니다.'; end if;
+     before_hs:=jsonb_set(before_hs,array[cash_idx::text,'quantity'],to_jsonb(greatest(0,balance)));
+     if original->>'type' in ('매수','매도') then
+       select (x.n-1)::integer,x.value into stock_idx,h from jsonb_array_elements(before_hs) with ordinality x(value,n)
+         where x.value->>'ticker'=original->>'ticker' and x.value->>'currency'=original->>'currency';
+       if stock_idx is null then raise exception '기존 종목을 찾을 수 없습니다.'; end if;
+       if original->>'type'='매수' then
+         qty:=(h->>'quantity')::numeric-(original->>'quantity')::numeric;
+         basis:=(h->>'quantity')::numeric*(h->>'costPrice')::numeric-(original->>'quantity')::numeric*(original->>'price')::numeric;
+         if qty < -1e-8 or basis < -1e-6 then raise exception '기존 매입원가를 안전하게 복원할 수 없습니다.'; end if;
+         h:=h||jsonb_build_object('quantity',greatest(0,qty),'costPrice',case when qty>1e-8 then greatest(0,basis)/qty else 0 end);
+       else h:=h||jsonb_build_object('quantity',(h->>'quantity')::numeric+(original->>'quantity')::numeric);
+       end if;
+       before_hs:=jsonb_set(before_hs,array[stock_idx::text],h);
+     end if;
+   end if;
+ end if;
+ if jsonb_array_length(before_hs)=0 or exists(select 1 from jsonb_array_elements(before_hs) b where b->>'owner' is distinct from p_owner or b->>'account' is distinct from account_name) then raise exception '이전 계좌 상태를 확인할 수 없습니다.'; end if;
+ select coalesce(jsonb_object_agg(b->>'ticker'||'|'||(b->>'currency'),b->'price'),'{}'::jsonb) into global_prices from jsonb_array_elements(s->'holdings') b;
+ select coalesce(jsonb_object_agg(b->>'ticker'||'|'||(b->>'currency'),b),'{}'::jsonb) into latest from jsonb_array_elements(s->'holdings') b where b->>'owner'=p_owner and b->>'account'=account_name;
+ select coalesce(jsonb_agg(b),'[]'::jsonb) into restored from jsonb_array_elements(s->'holdings') b where not (b->>'owner'=p_owner and b->>'account'=account_name);
+ select coalesce(jsonb_agg(x.value order by x.n),'[]'::jsonb) into h from jsonb_array_elements(s->'transactions') with ordinality x(value,n) where x.n<=idx;
+ s:=s||jsonb_build_object('holdings',restored||before_hs,'transactions',h);
+ for old in select x.value from jsonb_array_elements(p_state->'transactions') with ordinality x(value,n) where x.n>=idx+1 order by x.n loop
+   if old->>'id'=p_id and p_replacement is null then continue; end if;
+   if old->>'owner'=p_owner and old->>'account'=account_name then
+     if old->>'cashAccounting' is distinct from 'native-v2' or coalesce((old->>'imported')::boolean,false) then raise exception '이후 거래를 재계산할 수 없습니다.'; end if;
+     entry:=case when old->>'id'=p_id then p_replacement else old end;
+     if old->>'id'<>p_id and old->>'type'='환전' then entry:=entry||jsonb_build_object('fromCurrency',old->>'currency'); end if;
+     if old->>'id'<>p_id and old->>'type'='잔고조정' then entry:=entry||jsonb_build_object('krwBalance',old#>'{after,KRW}','usdBalance',old#>'{after,USD}'); end if;
+     entry:=entry||jsonb_build_object('account',account_name,'date',old->>'date');
+     s:=portfolio_private.apply_transaction(s,entry,p_owner,true);
+     last_idx:=jsonb_array_length(s->'transactions')-1;
+     next_tx:=(s->'transactions'->last_idx)||jsonb_build_object('id',old->>'id','createdAt',old->'createdAt');
+     if old ? 'modifiedAt' then next_tx:=next_tx||jsonb_build_object('modifiedAt',old->'modifiedAt'); end if;
+     if old->>'id'=p_id then next_tx:=next_tx||jsonb_build_object('modifiedAt',clock_timestamp());changed:=next_tx;end if;
+     s:=jsonb_set(s,array['transactions',last_idx::text],next_tx);
+   else s:=s||jsonb_build_object('transactions',(s->'transactions')||jsonb_build_array(old));
+   end if;
+ end loop;
+ select jsonb_agg(case when b->>'owner'=p_owner and b->>'account'=account_name and latest ? (b->>'ticker'||'|'||(b->>'currency')) then
+   b||jsonb_build_object('price',latest#>array[b->>'ticker'||'|'||(b->>'currency'),'price'],'id',latest#>array[b->>'ticker'||'|'||(b->>'currency'),'id']) when b->>'owner'=p_owner and b->>'account'=account_name and global_prices ? (b->>'ticker'||'|'||(b->>'currency')) then b||jsonb_build_object('price',global_prices->(b->>'ticker'||'|'||(b->>'currency'))) else b end order by x.n)
+   into restored from jsonb_array_elements(s->'holdings') with ordinality x(b,n);
+ s:=s||jsonb_build_object('holdings',restored,'transactionAudit',coalesce(s->'transactionAudit','[]'::jsonb)||jsonb_build_array(jsonb_build_object(
+   'action',case when p_replacement is null then 'delete' else 'edit' end,'transactionId',p_id,'owner',p_owner,'at',clock_timestamp(),'before',original,'after',changed)));
+ return s;
+end $$;
+
+create or replace function public.portfolio_mutate(p_action text, p_entry jsonb)
+returns jsonb language plpgsql security definer set search_path = '' as $$
+declare
+  s jsonb; v_owner text; v_today text := to_char(current_timestamp at time zone 'Asia/Seoul', 'YYYY-MM-DD');
+  hs jsonb; h jsonb; cash jsonb; tx jsonb; v_index integer; v_cash_index integer;
+  v_type text; v_account text; v_ticker text; v_currency text;
+  v_quantity numeric; v_price numeric; v_fx numeric; v_fee numeric; v_fee_krw numeric;
+  v_gross numeric; v_amount numeric; v_cash numeric; v_old_quantity numeric; v_cost numeric; v_value numeric;
+  v_pair record; v_native text; v_krw_i integer; v_usd_i integer; v_krw numeric; v_usd numeric; v_received numeric; v_before jsonb; v_profile jsonb; v_key text; v_field text;
+begin
+  select owner into v_owner from public.portfolio_members where user_id = auth.uid();
+  if v_owner is null then raise exception using errcode = '42501', message = '등록된 가족 계정만 이용할 수 있습니다.'; end if;
+  if jsonb_typeof(p_entry) is distinct from 'object' or octet_length(p_entry::text) > 32000 then raise exception '요청 형식을 확인해 주세요.'; end if;
+  if p_action not in ('transactions', 'prices', 'snapshot', 'fees', 'edit_transaction', 'delete_transaction') or p_action is null then raise exception '지원하지 않는 요청입니다.'; end if;
+  select payload into s from public.portfolio_data where id = 1 for update;
+  if s is null then raise exception '초기 자산 데이터가 아직 등록되지 않았습니다.'; end if;
+  if jsonb_typeof(p_entry->'version') is distinct from 'number' or p_entry->'version' is distinct from s->'version' then
+    raise exception using errcode = '40001', message = '다른 기기에서 변경되었습니다. 창을 닫고 최신 정보를 확인한 후 다시 입력해 주세요.';
+  end if;
+  hs := s->'holdings';
+  if p_action = 'fees' then
+    v_account:=p_entry->>'account';
+    if not exists(select 1 from jsonb_array_elements(hs) fee_asset where fee_asset->>'owner'=v_owner and fee_asset->>'account'=v_account) then raise exception '본인 계좌를 확인해 주세요.'; end if;
+    if p_entry->>'market' is null or p_entry->>'market' not in ('KRX','NXT','ETF','US') or p_entry->>'side' is null or p_entry->>'side' not in ('매수','매도') then raise exception '시장과 거래 종류를 확인해 주세요.'; end if;
+    v_profile:=p_entry->'profile';
+    if jsonb_typeof(v_profile) is distinct from 'object' or v_profile->>'rounding' is null or v_profile->>'rounding' not in ('nearest','floor','ceil') then raise exception '요율 설정을 확인해 주세요.'; end if;
+    foreach v_field in array array['commissionRate','otherRate','taxRate','minTax'] loop
+      v_amount:=portfolio_private.number(v_profile->v_field,'수수료율',true);
+      if v_amount > (case when v_field='minTax' then 1000000 else 100 end) then raise exception '요율 설정 범위를 확인해 주세요.'; end if;
+    end loop;
+    v_profile:=jsonb_build_object('commissionRate',v_profile->'commissionRate','otherRate',v_profile->'otherRate','taxRate',v_profile->'taxRate','minTax',v_profile->'minTax','rounding',v_profile->'rounding');
+    v_key:=v_account||'|'||(p_entry->>'market')||'|'||(p_entry->>'side');
+    s:=s||jsonb_build_object('feeProfiles',coalesce(s->'feeProfiles','{}'::jsonb)||jsonb_build_object(v_owner,coalesce(s#>array['feeProfiles',v_owner],'{}'::jsonb)||jsonb_build_object(v_key,v_profile)));
+  elsif p_action = 'transactions' then
+    s:=portfolio_private.apply_transaction(s,p_entry,v_owner);
+  elsif p_action in ('edit_transaction','delete_transaction') then
+    if p_action='edit_transaction' and jsonb_typeof(p_entry->'replacement') is distinct from 'object' then raise exception '수정 내용을 확인해 주세요.'; end if;
+    s:=portfolio_private.change_transaction(s,p_entry->>'id',case when p_action='delete_transaction' then null else p_entry->'replacement' end,v_owner);
   elsif p_action = 'prices' then
     v_fx := portfolio_private.number(p_entry->'fx', '환율');
     if v_fx > 100000 or jsonb_typeof(p_entry->'prices') is distinct from 'object' then raise exception '환율 또는 가격을 확인해 주세요.'; end if;

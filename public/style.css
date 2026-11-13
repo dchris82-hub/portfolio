@@ -27,3 +27,5 @@
 
 .fee-auto-label{display:flex;align-items:center;gap:9px;color:#365c40;font-size:13px}.fee-auto-label input{width:18px;min-height:18px;margin:0;accent-color:#23533e}.fee-details{border:1px solid #dfe7d6;border-radius:8px;padding:14px;margin:16px 0}.fee-details summary{font-size:13px;cursor:pointer;color:#3e6145}.fee-details>p{margin:12px 0}.fee-details label{margin-top:12px}.fee-details [role=status]{margin-top:10px}
 #fee-market-label[hidden]{display:none}
+
+.transaction-list .transaction-row{flex-wrap:wrap}.transaction-actions{display:flex;justify-content:flex-end;gap:9px;width:100%;padding-top:4px}.transaction-actions .btn{min-height:36px;font-size:12px}.delete-action{color:#a84e3e;border-color:#ead5ce;background:#fcf4ef}.danger{background:#a74b3b;color:#fff}.delete-explanation{font-size:13px;line-height:1.9;color:#7c816f;margin:18px 0}

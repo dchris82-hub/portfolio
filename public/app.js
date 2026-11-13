@@ -88,7 +88,9 @@ function render() {
   <nav class="mobile-nav">${nav.map(([id, title, i]) => `<button data-view="${id}" class="${view === id ? 'active' : ''}">${icon(i)}<span>${title}</span></button>`).join('')}</nav></div>`;
   $$('[data-view]', el => el.onclick = () => { view = el.dataset.view; account = '전체'; search = ''; render(); window.scrollTo(0, 0); });
   $$('[data-owner]', el => el.onclick = () => { owner = el.dataset.owner; account = '전체'; render(); });
-  $('#add').onclick = transactionModal;
+  $('#add').onclick = () => transactionModal();
+  $$('[data-edit-transaction]', el => el.onclick = () => transactionModal(data.transactions.find(t=>t.id===el.dataset.editTransaction)));
+  $$('[data-delete-transaction]', el => el.onclick = () => deleteTransaction(data.transactions.find(t=>t.id===el.dataset.deleteTransaction)));
   $('#settings').onclick = settingsModal;
   $('#refresh').onclick = async () => { try { data = await api('state'); render(); toast('최신 저장 데이터를 불러왔습니다.'); } catch (e) { toast(e.message); } };
   $('#logout').onclick = async () => { try { await api('logout', {}); clearInterval(refreshTimer); data = null; authScreen(await api('status')); } catch (e) { toast(e.message); } };
@@ -151,11 +153,11 @@ function assets() {
 }
 function filteredTransactions() { return data.transactions.filter(t => owner === '전체' || t.owner === owner).toReversed(); }
 function transactionRows(rows) {
-  return rows.map(t => `<div class="transaction-row"><span class="type-badge ${['매수', '입금'].includes(t.type) ? 'buy' : 'sell'}">${esc(t.type)}</span><div class="transaction-name"><strong>${esc(t.name)}</strong><small>${esc(t.owner)} · ${esc(t.account)} · ${t.date ? esc(t.date.slice(5).replace('-', '.')) : '엑셀 기록'}</small></div><div class="transaction-amount"><strong>${t.type==='잔고조정' ? '잔고 조정' : t.cashAccounting==='native-v2' ? (hidden ? '•••' : num(t.amount)) : money(t.amount)}<small>${t.cashAccounting==='native-v2' ? esc(t.currency) : '원'}</small></strong><span>${t.type==='환전' ? '→ '+num(t.received)+' '+esc(t.receivedCurrency) : t.type==='잔고조정' ? num(t.after?.KRW)+' KRW / '+num(t.after?.USD)+' USD' : ['매수', '매도'].includes(t.type) ? num(t.quantity) + '주' : esc(t.type)}</span></div></div>`).join('') || '<div class="empty">아직 거래 기록이 없어요.</div>';
+  return rows.map(t => `<div class="transaction-row"><span class="type-badge ${['매수', '입금'].includes(t.type) ? 'buy' : 'sell'}">${esc(t.type)}</span><div class="transaction-name"><strong>${esc(t.name)}</strong><small>${esc(t.owner)} · ${esc(t.account)} · ${t.date ? esc(t.date.slice(5).replace('-', '.')) : '엑셀 기록'}</small></div><div class="transaction-amount"><strong>${t.type==='잔고조정' ? '잔고 조정' : t.cashAccounting==='native-v2' ? (hidden ? '•••' : num(t.amount)) : money(t.amount)}<small>${t.cashAccounting==='native-v2' ? esc(t.currency) : '원'}</small></strong><span>${t.type==='환전' ? '→ '+num(t.received)+' '+esc(t.receivedCurrency) : t.type==='잔고조정' ? num(t.after?.KRW)+' KRW / '+num(t.after?.USD)+' USD' : ['매수', '매도'].includes(t.type) ? num(t.quantity) + '주' : esc(t.type)}</span></div>${view==='history' && t.owner===data.user && !t.imported && t.cashAccounting==='native-v2' ? `<div class="transaction-actions"><button class="btn secondary" data-edit-transaction="${esc(t.id)}">수정</button><button class="btn delete-action" data-delete-transaction="${esc(t.id)}">삭제</button></div>` : ''}</div>`).join('') || '<div class="empty">아직 거래 기록이 없어요.</div>';
 }
 function history() {
   const rows = filteredTransactions().filter(t => !search || `${t.name} ${t.ticker} ${t.type} ${t.account}`.toLowerCase().includes(search.toLowerCase()));
-  return `<section class="panel"><div class="asset-toolbar"><div><h2>모든 거래 <span class="count">${rows.length}</span></h2><p>최근 입력순 · 내 계정의 거래만 추가할 수 있어요.</p></div><input id="search" type="search" placeholder="종목, 계좌, 거래 종류 검색" aria-label="거래 검색" value="${esc(search)}"></div><div class="transaction-list">${transactionRows(rows)}</div></section><p class="disclaimer">엑셀의 기존 100건에는 거래 날짜가 없어 원본 순서를 유지했습니다. 기존 기록은 보존하며, 새 거래만 현재 보유자산에 반영합니다.</p>`;
+  return `<section class="panel"><div class="asset-toolbar"><div><h2>모든 거래 <span class="count">${rows.length}</span></h2><p>최근 입력순 · 본인 앱 거래만 수정·삭제할 수 있어요.</p></div><input id="search" type="search" placeholder="종목, 계좌, 거래 종류 검색" aria-label="거래 검색" value="${esc(search)}"></div><div class="transaction-list">${transactionRows(rows)}</div></section><p class="disclaimer">엑셀의 기존 100건에는 거래 날짜가 없어 원본 순서를 유지했습니다. 엑셀 원본 및 구형 원화환산 거래는 읽기 전용입니다. 본인이 앱에 입력한 거래를 수정·삭제하면 현재 잔고를 재계산하며, 기존 자동 자산추이는 다시 작성하지 않습니다.</p>`;
 }
 function trend() {
   return `<section class="panel"><div class="panel-head"><div><h2>가족 전체 자산 추이</h2><p>자산 증감에는 입출금이 포함됩니다. 투자 수익률과 다를 수 있어요.</p></div><button id="snapshot" class="btn secondary" ${data.history.some(h => h.date === kday() && h.source === 'automatic') ? 'disabled title="오늘의 자동 기록을 보존합니다."' : ''}>${icon('plus')} 오늘 기록</button></div><div class="periods standalone">${['1개월', '3개월', '전체'].map(p => `<button data-period="${p}" class="${period === p ? 'active' : ''}">${p}</button>`).join('')}</div>${chart()}</section><section class="panel history-values"><div class="panel-head"><h2>기록된 자산</h2><span class="muted">${data.history.length}개 기록</span></div><div class="table-scroll"><table><thead><tr><th>날짜</th><th>출처</th><th class="right">적용 환율</th><th>환율 기준 시각</th><th class="right">가족 총자산</th></tr></thead><tbody>${data.history.toReversed().map(h => `<tr><td>${esc(h.date)}</td><td><span class="source-tag">${h.source === 'automatic' ? '자동 ' + new Date(h.recordedAt).toLocaleTimeString('ko-KR', {timeZone:'Asia/Seoul',hour:'2-digit',minute:'2-digit',hour12:false}) : h.source === 'app' ? '앱 기록' : '엑셀'}</span></td><td class="right">${h.fx ? num(h.fx) + ' 원/$' : '—'}</td><td>${h.fxAsOf ? esc(localTime(h.fxAsOf)) : '—'}</td><td class="right strong">${money(h.value)} 원</td></tr>`).join('')}</tbody></table></div></section><p class="disclaimer">엑셀의 마지막 추이 값과 보유자산 합계는 원본부터 서로 다릅니다. 자동 기록은 한국시간 오전 7시 30분 기준입니다. 시세 조회 완료 후 약 1~3분 뒤 반영되며, 휴장일에는 최근 제공 시세를 사용합니다. 오늘의 자동 기록은 수동으로 덮어쓰지 않습니다.</p>`;
@@ -165,11 +167,16 @@ function openModal(html) {
   $('#modal').showModal();
   $('#close-modal').onclick = () => $('#modal').close();
 }
-function transactionModal() {
+function transactionModal(editTarget = null) {
+  if (editTarget && data.transactionEditingVersion !== 1) { toast('거래 수정·삭제 업그레이드 SQL을 먼저 실행해 주세요.'); return; }
   if (cloudApi && data.cashAccounting !== 'native-v2') { toast('원화·달러 잔고 업그레이드 SQL을 Supabase에서 먼저 실행해 주세요.'); return; }
   const accounts = [...new Set(data.holdings.filter(h => h.owner === data.user).map(h => h.account))];
-  openModal(`<div class="modal-head"><div><span class="eyebrow">A SMALL STEP FOR TOMORROW</span><h2>거래 기록하기</h2></div><button id="close-modal" class="icon-btn" aria-label="닫기">×</button></div><p class="muted">${esc(data.user)}님의 계좌에 기록합니다. 미국주식은 달러, 국내주식은 원화 잔고로 결제됩니다. 기존 잔고는 먼저 ‘잔고조정’으로 실제 예수금에 맞춰 주세요.</p><form id="transaction-form"><div class="form-grid"><label>거래 종류<select name="type">${['매수', '매도', '입금', '출금', '환전', '잔고조정'].map(t => `<option>${t}</option>`).join('')}</select></label><label>계좌<select name="account">${accounts.map(a => `<option>${esc(a)}</option>`).join('')}</select></label></div><label>거래일<input type="date" name="date" required value="${kday()}" min="${kday()}" max="${kday()}"></label><div id="trade-fields"></div><div class="trade-estimate" id="estimate"></div><p class="form-error" role="alert"></p><button class="btn primary wide">기록 저장하기 ${icon('arrow')}</button></form>`);
+  openModal(`<div class="modal-head"><div><span class="eyebrow">A SMALL STEP FOR TOMORROW</span><h2>${editTarget ? '거래 수정하기' : '거래 기록하기'}</h2></div><button id="close-modal" class="icon-btn" aria-label="닫기">×</button></div><p class="muted">${editTarget ? '계좌와 날짜는 원래 기록을 유지합니다. 잘못된 계좌로 입력했다면 삭제 후 다시 기록해 주세요.' : esc(data.user)+'님의 계좌에 기록합니다. 미국주식은 달러, 국내주식은 원화 잔고로 결제됩니다.'}</p><form id="transaction-form"><div class="form-grid"><label>거래 종류<select name="type">${['매수', '매도', '입금', '출금', '환전', '잔고조정'].map(t => `<option>${t}</option>`).join('')}</select></label><label>계좌<select name="account">${accounts.map(a => `<option>${esc(a)}</option>`).join('')}</select></label></div><label>거래일<input type="date" name="date" required value="${kday()}" min="${kday()}" max="${kday()}"></label><div id="trade-fields"></div><div class="trade-estimate" id="estimate"></div><p class="form-error" role="alert"></p><button class="btn primary wide">${editTarget ? '수정 저장하기' : '기록 저장하기'} ${icon('arrow')}</button></form>`);
   const form = $('#transaction-form'), version = data.version;
+  if (editTarget) {
+    form.elements.type.value=editTarget.type;form.elements.account.value=editTarget.account;form.elements.account.disabled=true;
+    form.elements.date.value=editTarget.date;form.elements.date.min=editTarget.date;form.elements.date.max=editTarget.date;form.elements.date.readOnly=true;
+  }
   function fields() {
     const type = form.elements.type.value;
     $('#trade-fields').innerHTML = ['입금', '출금'].includes(type) ? '<label>통화<select name="currency"><option value="KRW">원화 KRW</option><option value="USD">달러 USD</option></select></label><label>금액 (선택 통화)<input name="amount" type="number" min="0.000001" step="any" required inputmode="decimal" placeholder="0"></label>' : `<label>종목 티커<input name="ticker" required maxlength="20" list="tickers" placeholder="예: AAPL 또는 KRX:381170" autocomplete="off"></label><datalist id="tickers">${[...new Map(data.holdings.filter(h => h.ticker !== 'CASH').map(h => [h.ticker, h])).values()].map(h => `<option value="${esc(h.ticker)}">${esc(h.name)}</option>`).join('')}</datalist><label>종목명<input name="name" maxlength="100" placeholder="신규 종목이면 입력하세요"></label><div class="form-grid"><label>수량 (주)<input name="quantity" type="number" min="0.000001" step="any" required inputmode="decimal" placeholder="0"></label><label>거래 단가 <span id="currency-label">($ / 원)</span><input name="price" type="number" min="0.000001" step="any" required inputmode="decimal" placeholder="0"></label><label>수수료·세금 <span id="fee-currency-label">(원 / $)</span><input name="fee" type="number" min="0" step="any" inputmode="decimal" value="0"></label></div>`;
@@ -220,11 +227,30 @@ function transactionModal() {
   form.addEventListener('change', estimate);
   form.elements.account.onchange = () => { if(form.elements.type.value==='잔고조정') fields(); else estimate(); };
   fields();
+  if (editTarget) {
+    const values={...editTarget,...(editTarget.type==='환전'?{fromCurrency:editTarget.currency}:{}),...(editTarget.type==='잔고조정'?{krwBalance:editTarget.after.KRW,usdBalance:editTarget.after.USD}:{})};
+    for (const key of ['ticker','name','quantity','price','fee','currency','amount','received','fromCurrency','krwBalance','usdBalance']) if (form.elements[key] && values[key] !== undefined) form.elements[key].value=values[key];
+    if(form.elements.feeAuto) {
+      const domestic=String(editTarget.ticker).startsWith('KRX:');
+      const automatic=calculateFee(editTarget.quantity,editTarget.price,defaultFeeProfile(domestic?'KRX':'US',editTarget.type),domestic?'KRW':'USD').total;
+      form.elements.feeAuto.checked=Math.abs(Number(editTarget.fee||0)-automatic)<1e-9;
+    }
+    estimate();
+  }
   form.onsubmit = async e => {
     e.preventDefault(); const b = Object.fromEntries(new FormData(form));
     for (const k of ['quantity', 'price', 'fee', 'amount', 'received', 'krwBalance', 'usdBalance']) if (k in b) b[k] = Number(b[k]);
     const button = form.querySelector('button[type="submit"]') || form.querySelector('button'); button.disabled = true;
-    try { data = await api('transactions', { ...b, version }); $('#modal').close(); render(); toast('거래를 저장했습니다. 다른 기기에도 반영됩니다.'); } catch (err) { form.querySelector('.form-error').textContent = err.message; } finally { button.disabled = false; }
+    try { data = await api(editTarget ? 'edit_transaction' : 'transactions', editTarget ? {id:editTarget.id,replacement:{...b,account:editTarget.account,date:editTarget.date},version} : {...b,version}); $('#modal').close(); render(); toast(editTarget ? '거래를 수정하고 현재 잔고를 재계산했습니다.' : '거래를 저장했습니다. 다른 기기에도 반영됩니다.'); } catch (err) { form.querySelector('.form-error').textContent = err.message; } finally { button.disabled = false; }
+  };
+}
+function deleteTransaction(target) {
+  if(data.transactionEditingVersion!==1) {toast('거래 수정·삭제 업그레이드 SQL을 먼저 실행해 주세요.');return;}
+  openModal(`<div class="modal-head"><h2>거래를 삭제할까요?</h2><button id="close-modal" class="icon-btn" aria-label="닫기">×</button></div><p class="muted">${esc(target.date)} · ${esc(target.account)} · ${esc(target.type)} · ${esc(target.name)}</p><p class="delete-explanation">삭제하면 현재 보유 수량·매입원가·현금 잔고를 재계산합니다. 이후 거래의 잔고가 부족해지면 삭제되지 않습니다. 기존 자동 자산추이는 유지하며, 삭제한 거래는 변경 이력에 보관합니다.</p><p class="form-error" role="alert"></p><button id="confirm-delete" type="button" class="btn danger wide">삭제하고 잔고 재계산</button>`);
+  $('#confirm-delete').onclick=async()=>{
+    const button=$('#confirm-delete');button.disabled=true;
+    try {data=await api('delete_transaction',{id:target.id,version:data.version});$('#modal').close();render();toast('거래를 삭제하고 현재 잔고를 재계산했습니다.');}
+    catch(e){$('#modal .form-error').textContent=e.message;button.disabled=false;}
   };
 }
 function settingsModal() {

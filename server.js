@@ -5,7 +5,7 @@ import { randomBytes, scryptSync, timingSafeEqual, createHash } from 'node:crypt
 import { readFileSync, existsSync, mkdirSync, chmodSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { transact, totalOf, today } from './lib.js';
+import { transact, changeTransaction, totalOf, today } from './lib.js';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const dataDir = path.resolve(process.env.DATA_DIR || '/workspace/portfolio-data');
@@ -106,15 +106,18 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && ['/api/state', '/api/export'].includes(url.pathname)) {
       const headers = url.pathname.endsWith('export') ? { 'Content-Disposition': 'attachment; filename="portfolio-backup.json"' } : {};
-      return send(res, 200, { ...state(), user: session.name }, headers);
+      return send(res, 200, { ...state(), user: session.name, transactionEditingVersion:1 }, headers);
     }
-    if (req.method !== 'POST' || !['/api/transactions', '/api/prices', '/api/snapshot', '/api/fees'].includes(url.pathname)) return send(res, 404, { error: '기능을 찾을 수 없습니다.' });
+    if (req.method !== 'POST' || !['/api/transactions', '/api/prices', '/api/snapshot', '/api/fees', '/api/edit_transaction', '/api/delete_transaction'].includes(url.pathname)) return send(res, 404, { error: '기능을 찾을 수 없습니다.' });
     const b = await readBody(req);
     db.exec('BEGIN IMMEDIATE');
     try {
       const s = state();
       if (b.version !== s.version) { db.exec('ROLLBACK'); return send(res, 409, { error: '다른 기기에서 변경되었습니다. 최신 정보를 확인한 후 다시 입력해 주세요.' }); }
-      if (url.pathname.endsWith('fees')) {
+      if (url.pathname.endsWith('edit_transaction') || url.pathname.endsWith('delete_transaction')) {
+        if(url.pathname.endsWith('edit_transaction') && (!b.replacement || typeof b.replacement!=='object' || Array.isArray(b.replacement))) throw Error('수정 내용을 확인해 주세요.');
+        changeTransaction(s,b.id,url.pathname.endsWith('delete_transaction')?null:b.replacement,session.name);
+      } else if (url.pathname.endsWith('fees')) {
         if (!s.holdings.some(h=>h.owner===session.name&&h.account===b.account) || !['KRX','NXT','ETF','US'].includes(b.market) || !['매수','매도'].includes(b.side)) throw Error('계좌와 거래 유형을 확인해 주세요.');
         const profile=validateFeeProfile(b.profile);
         s.feeProfiles ||= {};s.feeProfiles[session.name] ||= {};
@@ -141,7 +144,7 @@ const server = http.createServer(async (req, res) => {
       s.version++;
       db.prepare('UPDATE state SET json=? WHERE id=1').run(JSON.stringify(s));
       db.exec('COMMIT');
-      return send(res, 200, { ...s, user: session.name });
+      return send(res, 200, { ...s, user: session.name, transactionEditingVersion:1 });
     } catch (e) { db.exec('ROLLBACK'); throw e; }
   } catch (e) {
     const expected = !e.code;

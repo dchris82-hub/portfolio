@@ -76,7 +76,7 @@ export function createClient(config, options = {}) {
         return {};
       }
       if (route === 'state' || route === 'export') return rpc('portfolio_get_state');
-      if (['transactions', 'prices', 'snapshot', 'fees'].includes(route)) return rpc('portfolio_mutate', { p_action: route, p_entry: body });
+      if (['transactions', 'prices', 'snapshot', 'fees', 'edit_transaction', 'delete_transaction'].includes(route)) return rpc('portfolio_mutate', { p_action: route, p_entry: body });
       throw error('지원하지 않는 기능입니다.', 400);
     }
   };
